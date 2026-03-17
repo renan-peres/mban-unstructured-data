@@ -1,0 +1,1 @@
+﻿The data is intresting because when we did the tree modules, we saw some intresting patters that can predict the outcome before its out. The most intresting is that if the mother is bigger than 23 then the child is less than 2.5kg 
