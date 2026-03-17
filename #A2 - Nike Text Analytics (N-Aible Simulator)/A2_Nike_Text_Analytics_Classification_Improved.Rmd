@@ -154,34 +154,52 @@ The CSVs produced by `00_data_collection.R` are loaded below. Each file contains
 # ─────────────────────────────────────────────────────────────────────────────
 # Load pre-collected Reddit and YouTube data from CSV files
 # ─────────────────────────────────────────────────────────────────────────────
-data_dir <- "data"
+# data_dir <- "data"
+# reddit_path  <- file.path(data_dir, "reddit_comments.csv")
+# youtube_path <- file.path(data_dir, "youtube_comments.csv")
 
-reddit_path  <- file.path(data_dir, "reddit_comments.csv")
-youtube_path <- file.path(data_dir, "youtube_comments.csv")
+# GitHub raw URLs
+reddit_url  <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data/reddit_comments.csv"
+youtube_url <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data/youtube_comments.csv"
 
-# Check that at least one file exists
-if (!file.exists(reddit_path) && !file.exists(youtube_path)) {
-  stop(
-    "No data files found in data/ folder.\n",
-    "Run 00_data_collection.R first to pull Reddit and YouTube data:\n",
-    "  source('00_data_collection.R')"
-  )
-}
-
-# Load whichever files exist
 source_frames <- list()
 
-if (file.exists(reddit_path)) {
-  reddit_df <- read_csv(reddit_path, show_col_types = FALSE)
+# Load Reddit
+cat("Loading Reddit data...\n")
+reddit_df <- tryCatch(
+  read_csv(reddit_url, show_col_types = FALSE),
+  error = function(e) {
+    cat("  Reddit CSV failed:", e$message, "\n")
+    NULL
+  }
+)
+
+if (!is.null(reddit_df)) {
   source_frames[["reddit"]] <- reddit_df
-  cat(sprintf("Loaded Reddit data: %s rows\n", format(nrow(reddit_df), big.mark = ",")))
+  cat(sprintf("✓ Reddit: %s rows\n", format(nrow(reddit_df), big.mark = ",")))
 }
 
-if (file.exists(youtube_path)) {
-  youtube_df <- read_csv(youtube_path, show_col_types = FALSE)
+# Load YouTube
+cat("Loading YouTube data...\n")
+youtube_df <- tryCatch(
+  read_csv(youtube_url, show_col_types = FALSE),
+  error = function(e) {
+    cat("  YouTube CSV failed:", e$message, "\n")
+    NULL
+  }
+)
+
+if (!is.null(youtube_df)) {
   source_frames[["youtube"]] <- youtube_df
-  cat(sprintf("Loaded YouTube data: %s rows\n", format(nrow(youtube_df), big.mark = ",")))
+  cat(sprintf("✓ YouTube: %s rows\n", format(nrow(youtube_df), big.mark = ",")))
 }
+
+# Final check
+if (length(source_frames) == 0) {
+  stop("No data loaded. URLs may be invalid or files don't exist on GitHub.")
+}
+
+cat(sprintf("\n✓ Loaded %d sources total\n", length(source_frames)))
 ```
 
 ```{r build-master-dataset}
