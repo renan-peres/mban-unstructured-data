@@ -25,6 +25,31 @@ library(jsonlite)
 
 set.seed(42)
 
+# Keep paths stable across OSes (Windows/macOS/Linux) and launch modes.
+get_script_dir <- function() {
+  cmd_args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- "--file="
+  script_path <- sub(file_arg, "", cmd_args[grep(file_arg, cmd_args)])
+  
+  if (length(script_path) > 0 && nzchar(script_path[1])) {
+    return(dirname(normalizePath(script_path[1], winslash = "/", mustWork = FALSE)))
+  }
+  
+  if (interactive() && requireNamespace("rstudioapi", quietly = TRUE)) {
+    active_path <- tryCatch(
+      rstudioapi::getActiveDocumentContext()$path,
+      error = function(e) ""
+    )
+    if (nzchar(active_path)) {
+      return(dirname(normalizePath(active_path, winslash = "/", mustWork = FALSE)))
+    }
+  }
+  
+  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+}
+
+setwd(get_script_dir())
+
 # Create data/ folder if it doesn't exist
 if (!dir.exists("data")) dir.create("data", recursive = TRUE)
 
@@ -39,6 +64,111 @@ cat(strrep("=", 60), "\n\n")
 extract_reddit_brand <- function(keywords, subreddits, brand_name,
                                  max_threads_per_sub = 10) {
   
+  safe_get_json <- function(url, max_attempts = 4, pause_seconds = 1.5) {
+    ua <- "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    
+    for (attempt in seq_len(max_attempts)) {
+      resp <- tryCatch(
+        httr::GET(
+          url,
+          httr::add_headers(
+            "User-Agent" = ua,
+            "Accept" = "application/json"
+          ),
+          httr::timeout(20)
+        ),
+        error = function(e) NULL
+      )
+      
+      if (!is.null(resp) && httr::status_code(resp) == 200) {
+        txt <- httr::content(resp, as = "text", encoding = "UTF-8")
+        parsed <- tryCatch(
+          jsonlite::fromJSON(txt),
+          error = function(e) NULL
+        )
+        if (!is.null(parsed)) return(parsed)
+      }
+      
+      if (attempt < max_attempts) {
+        wait <- pause_seconds * attempt
+        Sys.sleep(wait)
+      }
+    }
+    
+    NULL
+  }
+  
+  reddit_search_urls_fallback <- function(keyword, subreddit, limit = 100) {
+    query <- utils::URLencode(keyword, reserved = TRUE)
+    search_url <- paste0(
+      "https://www.reddit.com/r/", subreddit,
+      "/search.json?restrict_sr=on&q=", query,
+      "&sort=top&t=year&limit=", limit,
+      "&raw_json=1"
+    )
+    
+    search_json <- safe_get_json(search_url)
+    if (is.null(search_json) || is.null(search_json$data$children) ||
+        length(search_json$data$children) == 0) {
+      return(tibble::tibble(url = character()))
+    }
+    
+    posts <- search_json$data$children$data
+    posts_df <- tryCatch(tibble::as_tibble(posts), error = function(e) tibble::tibble())
+    if (nrow(posts_df) == 0 || !"permalink" %in% names(posts_df)) {
+      return(tibble::tibble(url = character()))
+    }
+    
+    threads <- posts_df %>%
+      dplyr::transmute(
+        url = dplyr::if_else(
+          !is.na(url_overridden_by_dest) & stringr::str_detect(url_overridden_by_dest, "^https?://"),
+          url_overridden_by_dest,
+          paste0("https://www.reddit.com", permalink)
+        )
+      ) %>%
+      dplyr::filter(stringr::str_detect(url, "/comments/")) %>%
+      dplyr::distinct(url)
+    
+    threads
+  }
+  
+  reddit_thread_comments_fallback <- function(thread_url, subreddit, brand_name) {
+    clean_url <- stringr::str_remove(thread_url, "\\?.*$")
+    comments_url <- paste0(clean_url, ".json?limit=500&raw_json=1")
+    
+    thread_json <- safe_get_json(comments_url, max_attempts = 3, pause_seconds = 2)
+    if (is.null(thread_json) || length(thread_json) < 2 ||
+        is.null(thread_json[[2]]$data$children) ||
+        length(thread_json[[2]]$data$children) == 0) {
+      return(tibble::tibble())
+    }
+    
+    comments_df <- tryCatch(
+      tibble::as_tibble(thread_json[[2]]$data$children$data),
+      error = function(e) tibble::tibble()
+    )
+    
+    if (nrow(comments_df) == 0 || !"body" %in% names(comments_df)) {
+      return(tibble::tibble())
+    }
+    
+    score_col <- dplyr::case_when(
+      "score" %in% names(comments_df) ~ "score",
+      "ups"   %in% names(comments_df) ~ "ups",
+      TRUE                              ~ NA_character_
+    )
+    
+    comments_df %>%
+      dplyr::transmute(
+        text = body,
+        rating = if (!is.na(score_col)) as.numeric(.data[[score_col]]) else NA_real_,
+        source = paste0("Reddit (r/", subreddit, ")"),
+        brand = brand_name
+      ) %>%
+      dplyr::filter(!is.na(text), nchar(stringr::str_trim(text)) > 10)
+  }
+  
   all_comments <- list()
   
   for (sub in subreddits) {
@@ -52,12 +182,12 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
           sort_by   = "top",
           period    = "year"
         ),
-        error = function(e) {
-          message(sprintf("    [Skip] No results for '%s' in r/%s: %s",
-                          kw, sub, e$message))
-          NULL
-        }
+        error = function(e) NULL
       )
+      
+      if (is.null(urls_df) || !is.data.frame(urls_df) || nrow(urls_df) == 0) {
+        urls_df <- reddit_search_urls_fallback(keyword = kw, subreddit = sub)
+      }
       
       if (is.null(urls_df) || !is.data.frame(urls_df) || nrow(urls_df) == 0) next
       
@@ -66,39 +196,68 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
       cat(sprintf("    Found %d threads, fetching comments from top %d...\n",
                   nrow(urls_df), n_threads))
       
+      clean <- tibble::tibble()
+      
+      # First try RedditExtractoR parser (often works even when direct JSON is blocked).
       thread_data <- tryCatch(
         get_thread_content(thread_urls),
-        error = function(e) {
-          message(sprintf("    [Skip] Could not fetch comments: %s", e$message))
-          NULL
-        }
+        error = function(e) NULL
       )
       
-      if (!is.null(thread_data$comments) && nrow(thread_data$comments) > 0) {
+      if (!is.null(thread_data) &&
+          !is.null(thread_data$comments) &&
+          is.data.frame(thread_data$comments) &&
+          nrow(thread_data$comments) > 0) {
         
         comments_df <- thread_data$comments
         
-        # Choose an available score column
+        text_col <- dplyr::case_when(
+          "comment" %in% names(comments_df) ~ "comment",
+          "body"    %in% names(comments_df) ~ "body",
+          TRUE                                ~ NA_character_
+        )
+        
         score_col <- dplyr::case_when(
           "comment_score" %in% names(comments_df) ~ "comment_score",
           "score"         %in% names(comments_df) ~ "score",
-          TRUE                                   ~ NA_character_
+          "ups"           %in% names(comments_df) ~ "ups",
+          TRUE                                      ~ NA_character_
         )
         
-        clean <- comments_df %>%
-          dplyr::transmute(
-            text   = comment,
-            rating = if (!is.na(score_col)) as.numeric(.data[[score_col]]) else NA_real_,
-            source = paste0("Reddit (r/", sub, ")"),
-            brand  = brand_name
-          ) %>%
-          dplyr::filter(!is.na(text), nchar(stringr::str_trim(text)) > 10)
-        
-        all_comments[[paste(sub, kw)]] <- clean
-        cat(sprintf("    Collected %d comments\n", nrow(clean)))
+        if (!is.na(text_col)) {
+          clean <- comments_df %>%
+            dplyr::transmute(
+              text = .data[[text_col]],
+              rating = if (!is.na(score_col)) as.numeric(.data[[score_col]]) else NA_real_,
+              source = paste0("Reddit (r/", sub, ")"),
+              brand = brand_name
+            ) %>%
+            dplyr::filter(!is.na(text), nchar(stringr::str_trim(text)) > 10)
+        }
       }
       
-      Sys.sleep(1)
+      # If primary parser returns nothing, fall back to direct JSON thread calls.
+      if (nrow(clean) == 0) {
+        clean <- dplyr::bind_rows(lapply(thread_urls, function(u) {
+          tryCatch(
+            reddit_thread_comments_fallback(
+              thread_url = u,
+              subreddit = sub,
+              brand_name = brand_name
+            ),
+            error = function(e) tibble::tibble()
+          )
+        }))
+      }
+      
+      if (nrow(clean) > 0) {
+        all_comments[[paste(sub, kw)]] <- clean
+        cat(sprintf("    Collected %d comments\n", nrow(clean)))
+      } else {
+        cat("    [Skip] No comments collected from selected threads\n")
+      }
+      
+      Sys.sleep(1.2)
     }
   }
   
