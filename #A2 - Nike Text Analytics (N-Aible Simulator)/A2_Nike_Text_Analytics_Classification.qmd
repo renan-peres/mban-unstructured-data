@@ -8,7 +8,7 @@ format:
             light: flatly
             dark: darkly
         highlight-style: github
-        code-fold: show
+        code-fold: true
         code-tools: 
             source: true
             toggle: true
@@ -21,7 +21,7 @@ format:
         smooth-scroll: true       
         page-layout: full
         toc: true
-        toc-location: left
+        toc-location: right
         lightbox: true
    #  ipynb: default
    #  pdf: default
