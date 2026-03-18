@@ -99,8 +99,8 @@ Nike's leadership has observed: (1) increasing online conversation around sustai
 
 Our analysis addresses **all five** strategic pillars required by the engagement:
 
-| # | Pillar | Question |
-|---|--------|----------|
+| \# | Pillar | Question |
+|----------------|-------------------------|-------------------------------|
 | 1 | Brand Perception | How is Nike emotionally positioned in online conversations versus Adidas and Under Armour? |
 | 2 | Brand Loyalty | What themes and language are most associated with brand loyalty and repeat purchase intent? |
 | 3 | Product Strategy | What complaints drive negative reviews of specific product lines (Pegasus, Air Max, Jordan, Metcon)? |
@@ -115,17 +115,17 @@ Our analysis addresses **all five** strategic pillars required by the engagement
 
 Based on preliminary industry context, we test the following:
 
-1. **H1 (Sizing & Durability):** Negative Nike sentiment is concentrated in sizing, durability, and price-related language -- at a rate significantly higher than Adidas.
-2. **H2 (Sustainability Polarity):** Sustainability mentions are polarized, with both trust-related and skepticism/greenwashing language present.
-3. **H3 (Brand Differentiation):** Nike's distinguishing language centers on innovation and performance, while Adidas over-indexes on style/lifestyle and Under Armour on fitness/training.
-4. **H4 (Price-Sentiment Link):** Reviews mentioning "price," "expensive," or "overpriced" exhibit significantly lower average sentiment scores than other reviews.
-5. **H5 (Rating Predictability):** Text features alone can predict low-rating reviews (1--2 stars) with accuracy > 65%, enabling proactive customer service triage.
+1.  **H1 (Sizing & Durability):** Negative Nike sentiment is concentrated in sizing, durability, and price-related language -- at a rate significantly higher than Adidas.
+2.  **H2 (Sustainability Polarity):** Sustainability mentions are polarized, with both trust-related and skepticism/greenwashing language present.
+3.  **H3 (Brand Differentiation):** Nike's distinguishing language centers on innovation and performance, while Adidas over-indexes on style/lifestyle and Under Armour on fitness/training.
+4.  **H4 (Price-Sentiment Link):** Reviews mentioning "price," "expensive," or "overpriced" exhibit significantly lower average sentiment scores than other reviews.
+5.  **H5 (Rating Predictability):** Text features alone can predict low-rating reviews (1--2 stars) with accuracy \> 65%, enabling proactive customer service triage.
 
 ## Financial & Operational Impact
 
-If sizing/quality complaints drive even a 2% increase in return rates on flagship lines, the revenue impact on Nike's $51B annual footwear revenue is approximately **$1B** in processing and lost-sale costs. Identifying these signals early is a material strategic advantage.
+If sizing/quality complaints drive even a 2% increase in return rates on flagship lines, the revenue impact on Nike's \$51B annual footwear revenue is approximately **\$1B** in processing and lost-sale costs. Identifying these signals early is a material strategic advantage.
 
----
+------------------------------------------------------------------------
 
 # 2. Data Collection Strategy
 
@@ -136,7 +136,7 @@ Data collection is handled by a **separate R script** (`00_data_collection.R`) t
 **Step 1 (run once):** Execute `source("00_data_collection.R")` in your R console. This produces:
 
 | File | Source | API / Package | Contents |
-|------|--------|---------------|----------|
+|----------------|----------------|-------------------------|----------------|
 | `data/reddit_comments.csv` | Reddit (r/Sneakers, r/Nike, r/RunningShoeGeeks) | `RedditExtractoR` | Comments for Nike, Adidas, Under Armour |
 | `data/youtube_comments.csv` | YouTube sneaker reviews | `httr` + YouTube Data API v3 | Comments from Nike/Adidas/UA review videos |
 
@@ -144,7 +144,7 @@ Data collection is handled by a **separate R script** (`00_data_collection.R`) t
 
 Both sources satisfy the assignment requirement of collecting text from **at least two channels**.
 
----
+------------------------------------------------------------------------
 
 # 3. Data Loading
 
@@ -264,7 +264,7 @@ raw_text %>%
   )
 ```
 
----
+------------------------------------------------------------------------
 
 # 4. Text Preprocessing & Feature Engineering
 
@@ -275,9 +275,7 @@ raw_text %>%
 # Build custom stopword list: standard English + domain-specific brand names
 # ─────────────────────────────────────────────────────────────────────────────
 custom_stop <- c(
-  "br", "href", "amp", "https", "gif", "nike", "adidas", "under", "armour", "armor", "shoe", "shoes", "app", "just", "really", "also", "would", "could", "im", "ive", "dont", "get", "got", "like", "one", "much", "even", "still", "way", "thing",  "use", "used", "using", "want", "need", "make", "made", "back",
-  "know", "think", "going", "gonna", "thats", "cant", "doesnt", "didnt",
-  "reddit", "subreddit", "post", "comment", "thread", "youtube", "video"
+  "br", "href", "amp", "https", "gif", "jpeg width", "format pjpg","nike", "adidas", "under", "armour", "armor", "shoe", "shoes", "app", "just", "really", "also", "would", "could", "im", "ive", "dont", "get", "got", "like", "one", "much", "even", "still", "way", "thing",  "use", "know", "think", "going", "gonna", "thats", "reddit", "subreddit", "post", "comment", "thread", "youtube", "video", "si", "no","pjpg","jpeg","png", "auto webp", "webp"
 )
 
 all_stop <- unique(c(
@@ -366,7 +364,7 @@ cat(sprintf(
 ))
 ```
 
----
+------------------------------------------------------------------------
 
 # 5. Sentiment & Emotion Analysis
 
@@ -570,7 +568,7 @@ sus_summary %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
----
+------------------------------------------------------------------------
 
 # 6. Topic Modeling (LDA)
 
@@ -655,7 +653,7 @@ topic_terms %>%
 
 > **Interpretation guidance:** Label each topic based on the terms. For example, if Topic 1 contains "run, mile, track, pace" it maps to "Running Performance." Map topics to strategic questions (product quality, pricing complaints, sustainability, etc.).
 
----
+------------------------------------------------------------------------
 
 # 7. Business Method 1: TF-IDF Brand Differentiation
 
@@ -695,7 +693,7 @@ tfidf_brand %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
----
+------------------------------------------------------------------------
 
 # 8. Business Method 2: Keyword Co-Occurrence Network
 
@@ -751,7 +749,7 @@ pair_counts %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
----
+------------------------------------------------------------------------
 
 # 9. Optional Advanced Challenge: Classification of Low-Rating Reviews
 
@@ -930,7 +928,7 @@ if (exists("cv_fit")) {
 }
 ```
 
----
+------------------------------------------------------------------------
 
 # 10. Findings & Strategic Recommendations
 
@@ -994,30 +992,34 @@ findings %>%
 ## Detailed Strategic Recommendations
 
 ### Brand Strategy
-- **Emotional Drivers:** Trust, anticipation, and joy are Nike's strongest emotional associations. These should anchor marketing narratives.
-- **Trust vs. Price Tension:** A measurable segment expresses trust in Nike quality while simultaneously noting high price points. Messaging should reframe price as "investment in performance."
-- **Athlete Endorsements:** Endorsement-related terms appear prominently in positive-sentiment documents. Continue athlete partnership strategy.
+
+-   **Emotional Drivers:** Trust, anticipation, and joy are Nike's strongest emotional associations. These should anchor marketing narratives.
+-   **Trust vs. Price Tension:** A measurable segment expresses trust in Nike quality while simultaneously noting high price points. Messaging should reframe price as "investment in performance."
+-   **Athlete Endorsements:** Endorsement-related terms appear prominently in positive-sentiment documents. Continue athlete partnership strategy.
 
 ### Product Operations
-- **Material Quality:** Durability complaints cluster around specific product lines -- flag for QA review.
-- **Sizing Inconsistencies:** Sizing-related bigrams (e.g., "runs small," "size chart") appear at elevated frequency. Recommend standardized fit guide.
-- **Supply Chain:** Delivery and availability terms appear in negative-sentiment clusters, suggesting fulfillment issues.
+
+-   **Material Quality:** Durability complaints cluster around specific product lines -- flag for QA review.
+-   **Sizing Inconsistencies:** Sizing-related bigrams (e.g., "runs small," "size chart") appear at elevated frequency. Recommend standardized fit guide.
+-   **Supply Chain:** Delivery and availability terms appear in negative-sentiment clusters, suggesting fulfillment issues.
 
 ### Market Risk
-- **Backlash Patterns:** Monitor co-occurrence clusters that link brand name with controversy terms.
-- **Sustainability Skepticism:** Greenwashing-adjacent language is present but not dominant. Proactive transparency recommended.
+
+-   **Backlash Patterns:** Monitor co-occurrence clusters that link brand name with controversy terms.
+-   **Sustainability Skepticism:** Greenwashing-adjacent language is present but not dominant. Proactive transparency recommended.
 
 ### Growth Opportunities
-- **High-Engagement Lines:** Identify which product lines show the strongest positive topic loadings.
-- **Trending Attributes:** Design-related terms in positive clusters suggest specific aesthetic directions.
-- **Influencer Language:** Terms from high-engagement documents can inform content strategy.
 
----
+-   **High-Engagement Lines:** Identify which product lines show the strongest positive topic loadings.
+-   **Trending Attributes:** Design-related terms in positive clusters suggest specific aesthetic directions.
+-   **Influencer Language:** Terms from high-engagement documents can inform content strategy.
+
+------------------------------------------------------------------------
 
 # 11. Limitations, Risk Controls & Ethical Considerations
 
-| # | Limitation | Impact | Mitigation |
-|---|-----------|--------|------------|
+| \# | Limitation | Impact | Mitigation |
+|---------------|--------------------|---------------|----------------------|
 | 1 | **Sampling Bias** | Reddit skews younger/male/US; YouTube skews toward engaged sneaker enthusiasts. Neither represents all Nike customers. | Triangulate across both sources. Note demographic skew in all recommendations. |
 | 2 | **Fake/Manipulated Content** | Coordinated upvote manipulation or astroturfing can distort Reddit sentiment. Lexicon methods cannot reliably detect this. | Flag suspiciously short or repetitive comments. Note this limitation for client. |
 | 3 | **Lexicon Bias** | Dictionary-based sentiment (NRC/Bing) cannot detect sarcasm, negation (e.g., "not great"), or domain-specific slang common on Reddit. | Supplement with classification model and manual spot-checks. Consider contextual models for production. |
@@ -1029,7 +1031,7 @@ findings %>%
 
 > **Client Disclosure:** All findings should be interpreted as directional signals, not statistically representative of all Nike customers. Recommend follow-up quantitative survey to validate key hypotheses before major strategic shifts.
 
----
+------------------------------------------------------------------------
 
 # 12. Appendix: Session Info
 
@@ -1037,6 +1039,6 @@ findings %>%
 sessionInfo()
 ```
 
----
+------------------------------------------------------------------------
 
 *End of Technical Appendix -- Team 6*
