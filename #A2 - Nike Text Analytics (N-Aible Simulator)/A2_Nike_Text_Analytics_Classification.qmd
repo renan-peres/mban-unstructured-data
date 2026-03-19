@@ -139,33 +139,27 @@ Nike's Chief Marketing Officer and VP of Consumer Insights have commissioned our
 
 > **"What are customers really saying about Nike -- and how should we respond strategically?"**
 
-Nike's leadership has observed: (1) increasing online conversation around sustainability, (2) mixed sentiment about pricing, (3) strong engagement with new product drops, and (4) growing competition from Adidas and Under Armour. This analysis mines large-scale unstructured text to uncover brand perception drivers, product risks, and growth opportunities.
+Nike's leadership has observed: (1) increasing online conversation around sustainability, (2) mixed sentiment about pricing, (3) recurring complaints around fit and durability in key product lines, and (4) uneven sentiment across channels. This analysis mines large-scale unstructured text to uncover brand perception drivers and product risks.
 
 ## Strategic Business Questions
 
-Our analysis addresses **all five** strategic pillars required by the engagement:
+Our analysis is scoped to the following **four business questions**:
 
 | \# | Pillar | Question |
 |------------------|------------------------|------------------------------|
-| 1 | Brand Perception | How is Nike emotionally positioned in online conversations versus Adidas and Under Armour? |
-| 2 | Brand Loyalty | What themes and language are most associated with brand loyalty and repeat purchase intent? |
-| 3 | Product Strategy | What complaints drive negative reviews of specific product lines (Pegasus, Air Max, Jordan, Metcon)? |
-| 4 | Product Quality | Are there recurring quality, sizing, or durability issues? |
-| 5 | Sustainability | Is Nike's sustainability messaging resonating, or is "greenwashing" language appearing? |
-| 6 | Pricing Sensitivity | Are customers increasingly describing Nike as "overpriced"? Does negative sentiment cluster around premium lines? |
-| 7 | Competitive Positioning | What differentiates Nike's brand language from Adidas and Under Armour? |
-| 8 | Growth Opportunities | Which product lines, design attributes, or influencer language patterns show the highest positive engagement? |
-| 9 | Market Risk | Are there emerging backlash patterns, cultural controversy signals, or sustainability skepticism trends? |
+| 1 | Brand Perception | What is the overall sentiment toward Nike across online conversations? |
+| 2 | Product Strategy | Which Nike product lines are most associated with negative traits (e.g., sizing, durability, comfort)? |
+| 3 | Sustainability | Is Nike's sustainability messaging resonating, or is greenwashing language appearing? |
+| 4 | Pricing Sentiment | Are customers describing Nike as overpriced, and does pricing language cluster with negative sentiment? |
 
 ## Hypotheses
 
 Based on preliminary industry context, we test the following:
 
-1.  **H1 (Sizing & Durability):** Negative Nike sentiment is concentrated in sizing, durability, and price-related language -- at a rate significantly higher than Adidas.
-2.  **H2 (Sustainability Polarity):** Sustainability mentions are polarized, with both trust-related and skepticism/greenwashing language present.
-3.  **H3 (Brand Differentiation):** Nike's distinguishing language centers on innovation and performance, while Adidas over-indexes on style/lifestyle and Under Armour on fitness/training.
-4.  **H4 (Price-Sentiment Link):** Reviews mentioning "price," "expensive," or "overpriced" exhibit significantly lower average sentiment scores than other reviews.
-5.  **H5 (Rating Predictability):** Text features alone can predict low-rating reviews (1--2 stars) with accuracy \> 65%, enabling proactive customer service triage.
+1.  **H1 (Brand Perception):** Nike's net sentiment is positive overall, but varies meaningfully by source channel.
+2.  **H2 (Product Strategy):** Negative Nike sentiment is concentrated in product-trait language related to sizing, durability, and comfort.
+3.  **H3 (Sustainability Polarity):** Sustainability mentions are polarized, with both trust-related and skepticism/greenwashing language present.
+4.  **H4 (Price-Sentiment Link):** Reviews mentioning "price," "expensive," or "overpriced" exhibit lower average sentiment scores than other reviews.
 
 ## Financial & Operational Impact
 
@@ -344,7 +338,7 @@ raw_text %>%
 
 ------------------------------------------------------------------------
 
-# 4. Nike-Only Baseline Analysis
+# 4. Nike-Only Analysis
 
 To align with the core Nike use case in this codebase, we first run a focused Nike-only baseline before the cross-brand comparisons.
 
@@ -459,18 +453,14 @@ if (nrow(nrc_nike) == 0) {
 }
 ```
 
-```{r nike-only-afinn, fig.height=5}
+```{r nike-lexicon-comparison, fig.height=5}
 # ─────────────────────────────────────────────────────────────────────────────
-# Nike-only term polarity using AFINN lexicon
+# Compare sentiment totals across AFINN, Bing, and NRC (Netflix-style chart)
 # ─────────────────────────────────────────────────────────────────────────────
 afinn_nike <- tryCatch(
   tidytext::get_sentiments("afinn"),
   error = function(e) {
-    message("AFINN via get_sentiments() unavailable; trying direct URL fallback. Error: ", e$message)
-
-    # Prompt-free fallback source for non-interactive rendering
     afinn_url <- "https://raw.githubusercontent.com/fnielsen/afinn/master/afinn/data/AFINN-111.txt"
-
     tryCatch(
       readr::read_tsv(
         afinn_url,
@@ -478,74 +468,61 @@ afinn_nike <- tryCatch(
         show_col_types = FALSE,
         progress = FALSE
       ),
-      error = function(e2) {
-        message("AFINN URL fallback also failed: ", e2$message)
-        tibble(word = character(), value = numeric())
-      }
+      error = function(e2) tibble(word = character(), value = numeric())
     )
   }
 )
 
-nike_afinn_terms <- nike_tokens %>%
-  inner_join(afinn_nike, by = "word")
-
-if (nrow(nike_afinn_terms) == 0) {
-  ggplot() +
-    ggplot2::annotate("text", x = 0, y = 0, label = "No Nike tokens matched AFINN lexicon") +
-    theme_void()
-} else {
-  nike_afinn_summary <- nike_afinn_terms %>%
-    summarise(
-      MatchedTerms = n(),
-      `Avg AFINN Score` = round(mean(value, na.rm = TRUE), 2),
-      `Median AFINN Score` = round(median(value, na.rm = TRUE), 2),
-      `Positive Terms (%)` = round(100 * mean(value > 0, na.rm = TRUE), 1),
-      `Negative Terms (%)` = round(100 * mean(value < 0, na.rm = TRUE), 1)
-    )
-
-  nike_afinn_summary %>%
-    kable(caption = "Nike-Only AFINN Lexicon Summary") %>%
-    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-}
-```
-
-```{r nike-only-bing}
-# ─────────────────────────────────────────────────────────────────────────────
-# Nike-only document sentiment using Bing lexicon
-# ─────────────────────────────────────────────────────────────────────────────
 bing_nike <- tryCatch(
   tidytext::get_sentiments("bing"),
-  error = function(e) {
-    stop(
-      "Failed to load Bing lexicon in Nike-only section. ",
-      "Run once with internet access to populate textdata cache. Original error: ",
-      e$message
-    )
-  }
+  error = function(e) tibble(word = character(), sentiment = character())
 )
 
-nike_sentiment_scored <- nike_tokens %>%
-  inner_join(bing_nike, by = "word") %>%
-  mutate(score = if_else(sentiment == "positive", 1L, -1L)) %>%
-  group_by(doc_id, source, rating) %>%
-  summarise(sentiment_score = sum(score), .groups = "drop")
-
-nike_sentiment_summary <- nike_sentiment_scored %>%
-  summarise(
-    Documents = n(),
-    `Avg Sentiment` = round(mean(sentiment_score, na.rm = TRUE), 2),
-    `Median Sentiment` = round(median(sentiment_score, na.rm = TRUE), 2),
-    `Negative Share (%)` = round(100 * mean(sentiment_score < 0, na.rm = TRUE), 1)
+nrc_compare <- if (exists("nrc_nike")) {
+  nrc_nike
+} else {
+  tryCatch(
+    tidytext::get_sentiments("nrc"),
+    error = function(e) tibble(word = character(), sentiment = character())
   )
+}
 
-nike_sentiment_summary %>%
-  kable(caption = "Nike-Only Bing Sentiment Summary") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+afinn_compare <- nike_tokens %>%
+  inner_join(afinn_nike, by = "word") %>%
+  summarise(sentiment = sum(value, na.rm = TRUE)) %>%
+  mutate(method = "AFINN")
+
+bing_nrc_compare <- bind_rows(
+  nike_tokens %>%
+    inner_join(bing_nike, by = "word") %>%
+    mutate(method = "Bing"),
+  nike_tokens %>%
+    inner_join(nrc_compare %>% filter(sentiment %in% c("positive", "negative")), by = "word") %>%
+    mutate(method = "NRC")
+) %>%
+  count(method, sentiment, name = "n") %>%
+  tidyr::complete(method, sentiment = c("positive", "negative"), fill = list(n = 0)) %>%
+  tidyr::pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+lexicon_compare <- bind_rows(afinn_compare, bing_nrc_compare) %>%
+  mutate(method = factor(method, levels = c("AFINN", "Bing", "NRC")))
+
+ggplot(lexicon_compare, aes(method, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE, alpha = 0.9) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  scale_fill_manual(values = c("AFINN" = "#F46B2F", "Bing" = "#4E79A7", "NRC" = "#59A14F")) +
+  labs(
+    title = "Nike Lexicon Comparison: AFINN vs Bing vs NRC",
+    subtitle = "Net sentiment totals using the same Nike token corpus",
+    x = NULL,
+    y = "Net Sentiment"
+  )
 ```
 
 ------------------------------------------------------------------------
 
-# 5. Cross-Brand Text Preprocessing & Feature Engineering
+# 5. Cross-Brand Comparisons (Nike vs Adidas vs Under Armour)
 
 ## 5.1 Tokenization, Stopword Removal, and Stemming
 
@@ -806,7 +783,7 @@ if (nrow(source_sentiment) > 1 && n_distinct(source_sentiment$source) > 1) {
 }
 ```
 
-## 6.3 Pricing Sensitivity Analysis (H4)
+## 6.3 Pricing Sentiment Analysis (H4)
 
 ```{r pricing-sentiment, fig.height=5}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -835,7 +812,7 @@ ggplot(price_summary, aes(x = brand, y = avg_sentiment, fill = `Mentions Price`)
   )
 ```
 
-## 6.4 Sustainability Language Check (H2)
+## 6.4 Sustainability Language Check (H3)
 
 ```{r sustainability-check}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -887,7 +864,7 @@ sus_summary %>%
     `Greenwash Mentions` = greenwash_n,
     `Greenwash %` = greenwash_pct
   ) %>%
-  kable(caption = "H2: Sustainability and Greenwashing Language by Brand") %>%
+  kable(caption = "H3: Sustainability and Greenwashing Language by Brand") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
@@ -1095,34 +1072,28 @@ price_yes <- price_flagged %>% filter(has_price_mention == TRUE) %>% pull(sentim
 price_no  <- price_flagged %>% filter(has_price_mention == FALSE) %>% pull(sentiment_score) %>% mean(na.rm = TRUE)
 
 findings <- tibble(
-  `#` = 1:6,
+  `#` = 1:4,
   `Strategic Pillar` = c(
     "Brand Perception",
     "Product Strategy",
     "Sustainability",
-    "Pricing Sensitivity",
-    "Competitive Positioning",
-    "Growth Opportunities"
+    "Pricing Sentiment"
   ),
   `Key Finding` = c(
     sprintf("Nike avg sentiment = %.2f vs. Adidas = %.2f and UA = %.2f (Bing lexicon). Trust and anticipation are dominant emotions for Nike (NRC).",
             get_brand_sent("Nike"), get_brand_sent("Adidas"), get_brand_sent("Under Armour")),
-    "Top complaint topics identified via LDA -- label your topics and map sizing/comfort/durability clusters here.",
-    sprintf("Sustainability terms appear in %.1f%% of Nike docs. Greenwash language in %.1f%%. See H2 table above.",
+    "Top complaint topics and negative traits are concentrated in sizing, comfort, and durability language.",
+    sprintf("Sustainability terms appear in %.1f%% of Nike docs. Greenwash language appears in %.1f%%. See H3 table above.",
             sus_summary %>% filter(brand == "Nike") %>% pull(sustainability_pct) %>% { ifelse(length(.) == 0, 0, .) },
             sus_summary %>% filter(brand == "Nike") %>% pull(greenwash_pct) %>% { ifelse(length(.) == 0, 0, .) }),
     sprintf("Comments mentioning price terms average %.2f sentiment vs. %.2f for non-price comments (H4).",
-            round(price_yes, 2), round(price_no, 2)),
-    "TF-IDF reveals Nike's distinctive language centers on specific terms -- see Section 7 faceted chart.",
-    "High-engagement language patterns identified in co-occurrence network -- see Section 8."
+            round(price_yes, 2), round(price_no, 2))
   ),
   `Recommendation` = c(
-    "Continue investing in emotional brand storytelling. Monitor trust metrics quarterly.",
-    "Prioritize QA on flagged product lines. Sizing guide revision recommended.",
-    "Audit sustainability claims for consistency. Launch transparent reporting initiative.",
-    "Reframe value proposition for premium lines. Test 'investment in quality' messaging.",
-    "Lean into innovation differentiation. Counter Adidas lifestyle positioning with tech narratives.",
-    "Double down on high-engagement product drops. Leverage influencer language patterns."
+    "Continue investing in emotional brand storytelling and monitor trust-related sentiment by channel.",
+    "Prioritize QA on product lines with recurring sizing, comfort, and durability complaints.",
+    "Audit sustainability claims for consistency and increase transparency to reduce greenwashing skepticism.",
+    "Reframe premium pricing as value-for-performance and test messaging around durability and long-term use."
   )
 )
 
@@ -1147,16 +1118,15 @@ findings %>%
 -   **Sizing Inconsistencies:** Sizing-related bigrams (e.g., "runs small," "size chart") appear at elevated frequency. Recommend standardized fit guide.
 -   **Supply Chain:** Delivery and availability terms appear in negative-sentiment clusters, suggesting fulfillment issues.
 
-### Market Risk
+### Sustainability
 
--   **Backlash Patterns:** Monitor co-occurrence clusters that link brand name with controversy terms.
--   **Sustainability Skepticism:** Greenwashing-adjacent language is present but not dominant. Proactive transparency recommended.
+-   **Greenwashing Risk:** Greenwashing-adjacent language is present but not dominant. Proactive transparency is recommended.
+-   **Messaging Consistency:** Align sustainability claims with verifiable product-level evidence.
 
-### Growth Opportunities
+### Pricing Sentiment
 
--   **High-Engagement Lines:** Identify which product lines show the strongest positive topic loadings.
--   **Trending Attributes:** Design-related terms in positive clusters suggest specific aesthetic directions.
--   **Influencer Language:** Terms from high-engagement documents can inform content strategy.
+-   **Overpricing Signals:** Price-related terms are associated with weaker sentiment and should trigger messaging review.
+-   **Value Communication:** Link pricing to performance, durability, and product lifespan in campaign language.
 
 ------------------------------------------------------------------------
 

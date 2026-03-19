@@ -2,6 +2,7 @@ br
 href
 amp
 www
+og
 com
 https
 gif
