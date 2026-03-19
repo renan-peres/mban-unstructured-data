@@ -344,9 +344,210 @@ raw_text %>%
 
 ------------------------------------------------------------------------
 
-# 4. Text Preprocessing & Feature Engineering
+# 4. Nike-Only Baseline Analysis
 
-## 4.1 Tokenization, Stopword Removal, and Stemming
+To align with the core Nike use case in this codebase, we first run a focused Nike-only baseline before the cross-brand comparisons.
+
+```{r nike-only-baseline}
+# ─────────────────────────────────────────────────────────────────────────────
+# Nike-only baseline view before cross-brand comparisons
+# ─────────────────────────────────────────────────────────────────────────────
+nike_text <- raw_text %>%
+  filter(brand == "Nike")
+
+if (nrow(nike_text) == 0) {
+  stop("No Nike documents found after data loading and brand normalization.")
+}
+
+nike_custom_stop <- read_terms_from_github(
+  url = github_custom_stopwords_url,
+  label = "custom stopwords",
+  stem = FALSE
+)
+
+nike_all_stop <- unique(c(
+  tidytext::stop_words$word,
+  stopwords::stopwords("en"),
+  nike_custom_stop
+))
+
+nike_tokens <- nike_text %>%
+  select(doc_id, source, rating, text) %>%
+  unnest_tokens(word, text) %>%
+  filter(str_detect(word, "^[a-z]{2,}$")) %>%
+  filter(!word %in% nike_all_stop) %>%
+  mutate(stem = SnowballC::wordStem(word, language = "en"))
+
+cat(sprintf(
+  "Nike-only baseline: %s documents and %s cleaned tokens.\n",
+  format(nrow(nike_text), big.mark = ","),
+  format(nrow(nike_tokens), big.mark = ",")
+))
+```
+
+```{r nike-only-summary-table}
+# ─────────────────────────────────────────────────────────────────────────────
+# Nike-only source summary
+# ─────────────────────────────────────────────────────────────────────────────
+nike_text %>%
+  group_by(Source = source) %>%
+  summarise(
+    Documents = n(),
+    `Avg Length` = round(mean(nchar(text)), 0),
+    `Avg Rating` = round(mean(rating, na.rm = TRUE), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Documents)) %>%
+  kable(caption = "Nike-Only Baseline Summary by Source") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 4.1 Top Frequent Terms
+
+```{r nike-only-top-terms, fig.height=5}
+# ─────────────────────────────────────────────────────────────────────────────
+# Top terms for Nike-only baseline
+# ─────────────────────────────────────────────────────────────────────────────
+nike_tokens %>%
+  count(stem, sort = TRUE) %>%
+  slice_head(n = 15) %>%
+  ggplot(aes(x = reorder(stem, n), y = n)) +
+  geom_col(fill = "#F46B2F", alpha = 0.85) +
+  coord_flip() +
+  labs(
+    title = "Nike-Only Baseline: Top 15 Stemmed Terms",
+    subtitle = "Before switching to cross-brand comparative analysis",
+    x = "Stem", y = "Frequency"
+  )
+```
+
+## 4.2 Lexicon Sentiment Snapshot
+
+```{r nike-only-nrc, fig.height=5}
+# ─────────────────────────────────────────────────────────────────────────────
+# Nike-only emotion profile using NRC lexicon
+# ─────────────────────────────────────────────────────────────────────────────
+nrc_nike <- tryCatch(
+  tidytext::get_sentiments("nrc"),
+  error = function(e) {
+    message("NRC lexicon unavailable in Nike-only section: ", e$message)
+    tibble(word = character(), sentiment = character())
+  }
+)
+
+if (nrow(nrc_nike) == 0) {
+  nike_nrc_pct <- tibble(sentiment = character(), n = integer(), pct = numeric())
+
+  ggplot() +
+    ggplot2::annotate("text", x = 0, y = 0, label = "NRC lexicon unavailable for Nike-only section") +
+    theme_void()
+} else {
+  nike_nrc_pct <- nike_tokens %>%
+    inner_join(nrc_nike, by = "word") %>%
+    filter(!sentiment %in% c("positive", "negative")) %>%
+    count(sentiment, sort = TRUE) %>%
+    mutate(pct = 100 * n / sum(n))
+
+  ggplot(nike_nrc_pct, aes(x = reorder(sentiment, pct), y = pct)) +
+    geom_col(fill = "#F46B2F", alpha = 0.85) +
+    coord_flip() +
+    labs(
+      title = "Nike-Only Emotion Profile (NRC)",
+      subtitle = "Share of emotion-tagged tokens in Nike documents",
+      x = "Emotion", y = "% of Emotion Tokens"
+    )
+}
+```
+
+```{r nike-only-afinn, fig.height=5}
+# ─────────────────────────────────────────────────────────────────────────────
+# Nike-only term polarity using AFINN lexicon
+# ─────────────────────────────────────────────────────────────────────────────
+afinn_nike <- tryCatch(
+  tidytext::get_sentiments("afinn"),
+  error = function(e) {
+    message("AFINN via get_sentiments() unavailable; trying direct URL fallback. Error: ", e$message)
+
+    # Prompt-free fallback source for non-interactive rendering
+    afinn_url <- "https://raw.githubusercontent.com/fnielsen/afinn/master/afinn/data/AFINN-111.txt"
+
+    tryCatch(
+      readr::read_tsv(
+        afinn_url,
+        col_names = c("word", "value"),
+        show_col_types = FALSE,
+        progress = FALSE
+      ),
+      error = function(e2) {
+        message("AFINN URL fallback also failed: ", e2$message)
+        tibble(word = character(), value = numeric())
+      }
+    )
+  }
+)
+
+nike_afinn_terms <- nike_tokens %>%
+  inner_join(afinn_nike, by = "word")
+
+if (nrow(nike_afinn_terms) == 0) {
+  ggplot() +
+    ggplot2::annotate("text", x = 0, y = 0, label = "No Nike tokens matched AFINN lexicon") +
+    theme_void()
+} else {
+  nike_afinn_summary <- nike_afinn_terms %>%
+    summarise(
+      MatchedTerms = n(),
+      `Avg AFINN Score` = round(mean(value, na.rm = TRUE), 2),
+      `Median AFINN Score` = round(median(value, na.rm = TRUE), 2),
+      `Positive Terms (%)` = round(100 * mean(value > 0, na.rm = TRUE), 1),
+      `Negative Terms (%)` = round(100 * mean(value < 0, na.rm = TRUE), 1)
+    )
+
+  nike_afinn_summary %>%
+    kable(caption = "Nike-Only AFINN Lexicon Summary") %>%
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+}
+```
+
+```{r nike-only-bing}
+# ─────────────────────────────────────────────────────────────────────────────
+# Nike-only document sentiment using Bing lexicon
+# ─────────────────────────────────────────────────────────────────────────────
+bing_nike <- tryCatch(
+  tidytext::get_sentiments("bing"),
+  error = function(e) {
+    stop(
+      "Failed to load Bing lexicon in Nike-only section. ",
+      "Run once with internet access to populate textdata cache. Original error: ",
+      e$message
+    )
+  }
+)
+
+nike_sentiment_scored <- nike_tokens %>%
+  inner_join(bing_nike, by = "word") %>%
+  mutate(score = if_else(sentiment == "positive", 1L, -1L)) %>%
+  group_by(doc_id, source, rating) %>%
+  summarise(sentiment_score = sum(score), .groups = "drop")
+
+nike_sentiment_summary <- nike_sentiment_scored %>%
+  summarise(
+    Documents = n(),
+    `Avg Sentiment` = round(mean(sentiment_score, na.rm = TRUE), 2),
+    `Median Sentiment` = round(median(sentiment_score, na.rm = TRUE), 2),
+    `Negative Share (%)` = round(100 * mean(sentiment_score < 0, na.rm = TRUE), 1)
+  )
+
+nike_sentiment_summary %>%
+  kable(caption = "Nike-Only Bing Sentiment Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+------------------------------------------------------------------------
+
+# 5. Cross-Brand Text Preprocessing & Feature Engineering
+
+## 5.1 Tokenization, Stopword Removal, and Stemming
 
 ```{r preprocessing}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -396,7 +597,7 @@ tokens %>%
   )
 ```
 
-## 4.2 Bigrams (N-grams)
+## 5.2 Bigrams (N-grams)
 
 ```{r bigrams, fig.height=8}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -428,7 +629,7 @@ bigrams %>%
   )
 ```
 
-## 4.3 Document-Term Matrix (DTM)
+## 5.3 Document-Term Matrix (DTM)
 
 ```{r dtm}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -446,9 +647,9 @@ cat(sprintf(
 
 ------------------------------------------------------------------------
 
-# 5. Lexicons (Sentiment Analysis)
+# 6. Cross-Brand Lexicon-Based Sentiment Analysis
 
-## 5.1 NRC Emotion Breakdown by Brand
+## 6.1 NRC Emotion Breakdown by Brand
 
 ```{r nrc-emotions, fig.height=7}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -515,7 +716,7 @@ if (nrow(nrc_pct) == 0) {
 }
 ```
 
-## 5.2 Bing Sentiment by Brand and Source
+## 6.2 Bing Sentiment by Brand and Source
 
 ```{r bing-sentiment}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -605,7 +806,7 @@ if (nrow(source_sentiment) > 1 && n_distinct(source_sentiment$source) > 1) {
 }
 ```
 
-## 5.3 Pricing Sensitivity Analysis (H4)
+## 6.3 Pricing Sensitivity Analysis (H4)
 
 ```{r pricing-sentiment, fig.height=5}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -634,7 +835,7 @@ ggplot(price_summary, aes(x = brand, y = avg_sentiment, fill = `Mentions Price`)
   )
 ```
 
-## 5.4 Sustainability Language Check (H2)
+## 6.4 Sustainability Language Check (H2)
 
 ```{r sustainability-check}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -692,7 +893,7 @@ sus_summary %>%
 
 ------------------------------------------------------------------------
 
-# 6. Topic Modeling (LDA)
+# 7. Cross-Brand Topic Modeling (LDA)
 
 ```{r lda-model, fig.height=8}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -777,7 +978,7 @@ topic_terms %>%
 
 ------------------------------------------------------------------------
 
-# 7. TF-IDF: Brand Differentiation
+# 8. Cross-Brand TF-IDF Brand Differentiation
 
 ```{r tfidf-brand, fig.height=8}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -817,7 +1018,7 @@ tfidf_brand %>%
 
 ------------------------------------------------------------------------
 
-# 8. Keyword Co-Occurrence Network
+# 9. Cross-Brand Keyword Co-Occurrence Network
 
 ```{r cooccurrence-network, fig.height=8, fig.width=10}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -873,7 +1074,7 @@ pair_counts %>%
 
 ------------------------------------------------------------------------
 
-# 9. Findings & Strategic Recommendations
+# 10. Findings & Strategic Recommendations
 
 ## Summary of Key Findings
 
@@ -959,7 +1160,7 @@ findings %>%
 
 ------------------------------------------------------------------------
 
-# 10. Limitations, Risk Controls & Ethical Considerations
+# 11. Limitations, Risk Controls & Ethical Considerations
 
 | \# | Limitation | Impact | Mitigation |
 |-----------------|-------------------|-----------------|---------------------|
@@ -975,7 +1176,7 @@ findings %>%
 
 ------------------------------------------------------------------------
 
-# 11. Appendix: Session Info
+# 12. Appendix: Session Info
 
 ```{r session-info}
 sessionInfo()

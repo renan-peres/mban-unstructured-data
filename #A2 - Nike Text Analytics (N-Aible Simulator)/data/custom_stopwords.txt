@@ -7,6 +7,8 @@ https
 gif
 jpeg width
 format pjpg
+preview redd
+redd
 nike
 adidas
 under
