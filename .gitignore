@@ -1,3 +1,9 @@
+# R
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+
 /.observablehq/cache/
 venv/
 secrets/

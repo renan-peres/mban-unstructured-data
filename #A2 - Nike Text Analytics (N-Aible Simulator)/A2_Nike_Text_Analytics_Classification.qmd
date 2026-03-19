@@ -204,9 +204,41 @@ The CSVs produced by `00_data_collection.R` are loaded below. Each file contains
 # reddit_path  <- file.path(data_dir, "reddit_comments.csv")
 # youtube_path <- file.path(data_dir, "youtube_comments.csv")
 
-# GitHub raw URLs
-reddit_url  <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data/reddit_comments.csv"
-youtube_url <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data/youtube_comments.csv"
+# GitHub raw URLs (data files + external term lists)
+github_data_base_url <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data"
+reddit_url                  <- paste0(github_data_base_url, "/reddit_comments.csv")
+youtube_url                 <- paste0(github_data_base_url, "/youtube_comments.csv")
+github_custom_stopwords_url <- paste0(github_data_base_url, "/custom_stopwords.txt")
+github_sustainability_url   <- paste0(github_data_base_url, "/sustainability_terms.txt")
+github_greenwashing_url     <- paste0(github_data_base_url, "/greenwashing_terms.txt")
+
+# Read and normalize external terms from GitHub text files
+read_terms_from_github <- function(url, label, stem = FALSE) {
+  raw_lines <- tryCatch(
+    readr::read_lines(url, progress = FALSE),
+    error = function(e) {
+      stop(sprintf("Failed to load %s from GitHub URL '%s': %s", label, url, e$message))
+    }
+  )
+
+  parsed <- raw_lines %>%
+    stringr::str_replace_all("#.*$", "") %>%
+    stringr::str_split(pattern = "[,;]") %>%
+    purrr::flatten_chr() %>%
+    stringr::str_trim() %>%
+    purrr::discard(~ .x == "")
+
+  if (length(parsed) == 0) {
+    stop(sprintf("GitHub terms file for %s is empty: %s", label, url))
+  }
+
+  terms <- tolower(parsed)
+  if (stem) {
+    terms <- SnowballC::wordStem(terms, language = "en")
+  }
+
+  unique(terms)
+}
 
 source_frames <- list()
 
@@ -318,10 +350,12 @@ raw_text %>%
 
 ```{r preprocessing}
 # ─────────────────────────────────────────────────────────────────────────────
-# Build custom stopword list: standard English + domain-specific brand names
+# Build stopword list: standard English + GitHub custom terms file
 # ─────────────────────────────────────────────────────────────────────────────
-custom_stop <- c(
-  "br", "href", "amp", "https", "gif", "jpeg width", "format pjpg","nike", "adidas", "under", "armour", "armor", "shoe", "shoes", "app", "just", "really", "also", "would", "could", "im", "ive", "dont", "get", "got", "like", "one", "much", "even", "still", "way", "thing",  "use", "know", "think", "going", "gonna", "thats", "reddit", "subreddit", "post", "comment", "thread", "youtube", "video", "si", "no","pjpg","jpeg","png", "auto webp", "webp", "jpg"
+custom_stop <- read_terms_from_github(
+  url = github_custom_stopwords_url,
+  label = "custom stopwords",
+  stem = FALSE
 )
 
 all_stop <- unique(c(
@@ -606,47 +640,15 @@ ggplot(price_summary, aes(x = brand, y = avg_sentiment, fill = `Mentions Price`)
 # ─────────────────────────────────────────────────────────────────────────────
 # Check for sustainability and greenwashing language presence
 # ─────────────────────────────────────────────────────────────────────────────
-read_terms_file <- function(path, fallback_terms, label) {
-  if (!file.exists(path)) {
-    message(sprintf("%s file not found at '%s'. Using fallback terms.", label, path))
-    return(unique(SnowballC::wordStem(tolower(fallback_terms), language = "en")))
-  }
-
-  raw_lines <- tryCatch(
-    readr::read_lines(path, progress = FALSE),
-    error = function(e) character()
-  )
-
-  parsed <- raw_lines %>%
-    stringr::str_replace_all("#.*$", "") %>%
-    stringr::str_split(pattern = "[,;]") %>%
-    purrr::flatten_chr() %>%
-    stringr::str_trim() %>%
-    purrr::discard(~ .x == "")
-
-  if (length(parsed) == 0) {
-    message(sprintf("%s file is empty at '%s'. Using fallback terms.", label, path))
-    return(unique(SnowballC::wordStem(tolower(fallback_terms), language = "en")))
-  }
-
-  unique(SnowballC::wordStem(tolower(parsed), language = "en"))
-}
-
-default_sustainability_terms <- c(
-  "sustain", "recycl", "green", "environ", "eco", "carbon",
-  "climat", "planet", "renew", "biodeg", "organ"
+sustainability_terms <- read_terms_from_github(
+  url = github_sustainability_url,
+  label = "sustainability terms",
+  stem = TRUE
 )
-default_greenwash_terms <- c("greenwash", "fakegrn", "virtue", "scam", "pretend", "market")
-
-sustainability_terms <- read_terms_file(
-  path = file.path("data", "sustainability_terms.txt"),
-  fallback_terms = default_sustainability_terms,
-  label = "Sustainability terms"
-)
-greenwash_terms <- read_terms_file(
-  path = file.path("data", "greenwashing_terms.txt"),
-  fallback_terms = default_greenwash_terms,
-  label = "Greenwashing terms"
+greenwash_terms <- read_terms_from_github(
+  url = github_greenwashing_url,
+  label = "greenwashing terms",
+  stem = TRUE
 )
 
 cat(sprintf("Loaded %d sustainability stems and %d greenwashing stems.\n",
@@ -871,186 +873,7 @@ pair_counts %>%
 
 ------------------------------------------------------------------------
 
-# 9. Classification of Low-Rating Reviews
-
-This section builds a **multinomial logistic regression** (LASSO-penalized via `glmnet`) to predict whether a review is low (1--2 stars), mid (3 stars), or high (4--5 stars) based solely on text features. For Reddit data, we use **upvote score** as a proxy for rating quality (negative/low upvotes = low quality, high upvotes = high quality).
-
-```{r classification-prep}
-# ─────────────────────────────────────────────────────────────────────────────
-# Prepare classification dataset
-# For Reddit: use upvote-based tertiles as proxy rating categories
-# For YouTube: use like count tertiles
-# ─────────────────────────────────────────────────────────────────────────────
-clf_data <- raw_text %>%
-  filter(!is.na(rating)) %>%
-  mutate(
-    # Create tercile-based rating categories from upvote/like scores
-    rating_tercile = ntile(rating, 3),
-    target = case_when(
-      rating_tercile == 1 ~ "low",
-      rating_tercile == 2 ~ "mid",
-      rating_tercile == 3 ~ "high"
-    ),
-    target = factor(target, levels = c("low", "mid", "high"))
-  )
-
-cat(sprintf("Classification dataset: %d documents with engagement scores.\n", nrow(clf_data)))
-
-if (nrow(clf_data) >= 100) {
-  cat("Class distribution:\n")
-  print(table(clf_data$target))
-}
-```
-
-```{r classification-model, fig.height=6}
-# ─────────────────────────────────────────────────────────────────────────────
-# Train/test split + LASSO multinomial logistic regression
-# ─────────────────────────────────────────────────────────────────────────────
-if (nrow(clf_data) >= 100) {
-
-  # Tokenize and stem
-  clf_tokens <- clf_data %>%
-    select(doc_id, target, text) %>%
-    unnest_tokens(word, text) %>%
-    filter(str_detect(word, "^[a-z]{2,}$"), !word %in% all_stop) %>%
-    mutate(word = SnowballC::wordStem(word))
-
-  # Top 1500 features
-  top_terms <- clf_tokens %>%
-    count(word, sort = TRUE) %>%
-    slice_head(n = 1500) %>%
-    pull(word)
-
-  # Sparse design matrix
-  x_mat <- clf_tokens %>%
-    filter(word %in% top_terms) %>%
-    count(doc_id, word) %>%
-    cast_sparse(doc_id, word, n)
-
-  # Align target vector with matrix rows
-  y_lookup <- clf_data %>% distinct(doc_id, target)
-  common_ids <- intersect(as.integer(rownames(x_mat)), y_lookup$doc_id)
-
-  x_mat <- x_mat[as.character(common_ids), , drop = FALSE]
-  y <- y_lookup %>%
-    filter(doc_id %in% common_ids) %>%
-    arrange(match(doc_id, common_ids)) %>%
-    pull(target)
-
-  # Train/test split (70/30)
-  set.seed(42)
-  train_idx <- sample(seq_along(y), size = floor(0.7 * length(y)))
-  x_train <- x_mat[train_idx, , drop = FALSE]
-  x_test  <- x_mat[-train_idx, , drop = FALSE]
-  y_train <- y[train_idx]
-  y_test  <- y[-train_idx]
-
-  # Cross-validated LASSO multinomial
-  cv_fit <- cv.glmnet(
-    x            = x_train,
-    y            = y_train,
-    family       = "multinomial",
-    type.measure = "class",
-    alpha        = 1,
-    nfolds       = 5
-  )
-
-  # Predictions on test set
-  pred_test <- predict(cv_fit, newx = x_test, s = "lambda.min", type = "class") %>%
-    as.vector()
-
-  # Metrics
-  clf_results <- tibble(
-    truth    = factor(y_test, levels = levels(clf_data$target)),
-    estimate = factor(pred_test, levels = levels(clf_data$target))
-  )
-
-  accuracy_val <- clf_results %>% yardstick::accuracy(truth, estimate) %>% pull(.estimate)
-
-  cat(sprintf("\nTest Set Accuracy: %.1f%% (n_test = %d)\n", accuracy_val * 100, length(y_test)))
-
-} else {
-  cat("Fewer than 100 scored documents. Skipping classification model.\n")
-}
-```
-
-```{r confusion-matrix, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Confusion matrix heatmap
-# ─────────────────────────────────────────────────────────────────────────────
-if (exists("clf_results")) {
-  cm <- clf_results %>%
-    count(truth, estimate) %>%
-    complete(truth, estimate, fill = list(n = 0))
-
-  ggplot(cm, aes(x = estimate, y = truth, fill = n)) +
-    geom_tile(color = "white") +
-    geom_text(aes(label = n), size = 6, fontface = "bold") +
-    scale_fill_gradient(low = "white", high = "#F46B2F") +
-    labs(
-      title    = "Classification Confusion Matrix",
-      subtitle = sprintf("Multinomial LASSO on test set (accuracy = %.1f%%)", accuracy_val * 100),
-      x = "Predicted Class", y = "Actual Class", fill = "Count"
-    ) +
-    theme(panel.grid = element_blank())
-}
-```
-
-```{r classification-metrics-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# Full classification metrics table
-# ─────────────────────────────────────────────────────────────────────────────
-if (exists("clf_results")) {
-  bind_rows(
-    clf_results %>% yardstick::accuracy(truth, estimate),
-    clf_results %>% yardstick::kap(truth, estimate)
-  ) %>%
-    mutate(.estimate = round(.estimate, 3)) %>%
-    select(Metric = .metric, Estimate = .estimate) %>%
-    kable(caption = "Classification Performance Metrics (Test Set)") %>%
-    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-}
-```
-
-```{r important-features, fig.height=6}
-# ─────────────────────────────────────────────────────────────────────────────
-# Top predictive features for LOW-engagement comments (risk signals)
-# ─────────────────────────────────────────────────────────────────────────────
-if (exists("cv_fit")) {
-  coefs <- coef(cv_fit, s = "lambda.min")
-
-  # Extract coefficients for the "low" class
-  low_coef <- as.matrix(coefs[["low"]])
-  low_df <- tibble(
-    term        = rownames(low_coef),
-    coefficient = low_coef[, 1]
-  ) %>%
-    filter(term != "(Intercept)", coefficient != 0) %>%
-    arrange(desc(abs(coefficient)))
-
-  if (nrow(low_df) > 0) {
-    low_df %>%
-      slice_head(n = 20) %>%
-      mutate(direction = if_else(coefficient > 0,
-                                 "Predicts Low Engagement",
-                                 "Predicts Higher Engagement")) %>%
-      ggplot(aes(x = reorder(term, coefficient), y = coefficient, fill = direction)) +
-      geom_col(alpha = 0.85) +
-      coord_flip() +
-      scale_fill_manual(values = c("Predicts Low Engagement"    = "#d62728",
-                                   "Predicts Higher Engagement" = "#2ca02c")) +
-      labs(
-        title    = "Top 20 Language Signals for Low-Engagement Comments",
-        subtitle = "LASSO coefficients -- positive = predicts low engagement (risk signal)",
-        x = "Term", y = "Coefficient", fill = NULL
-      )
-  }
-}
-```
-
-------------------------------------------------------------------------
-
-# 10. Findings & Strategic Recommendations
+# 9. Findings & Strategic Recommendations
 
 ## Summary of Key Findings
 
@@ -1136,24 +959,23 @@ findings %>%
 
 ------------------------------------------------------------------------
 
-# 11. Limitations, Risk Controls & Ethical Considerations
+# 10. Limitations, Risk Controls & Ethical Considerations
 
 | \# | Limitation | Impact | Mitigation |
 |-----------------|-------------------|-----------------|---------------------|
 | 1 | **Sampling Bias** | Reddit skews younger/male/US; YouTube skews toward engaged sneaker enthusiasts. Neither represents all Nike customers. | Triangulate across both sources. Note demographic skew in all recommendations. |
 | 2 | **Fake/Manipulated Content** | Coordinated upvote manipulation or astroturfing can distort Reddit sentiment. Lexicon methods cannot reliably detect this. | Flag suspiciously short or repetitive comments. Note this limitation for client. |
 | 3 | **Lexicon Bias** | Dictionary-based sentiment (NRC/Bing) cannot detect sarcasm, negation (e.g., "not great"), or domain-specific slang common on Reddit. | Supplement with classification model and manual spot-checks. Consider contextual models for production. |
-| 4 | **Overfitting Risk** | LASSO classification trained and tuned on same corpus may overestimate accuracy. | Report holdout test metrics only. Do not claim production-grade performance. |
-| 5 | **Temporal Bias** | Reddit and YouTube data reflects recent posts only. Historical trends cannot be inferred. | Disclose recency window in all findings. |
-| 6 | **Proxy Rating** | Reddit upvotes and YouTube likes are engagement signals, not product quality ratings. Using them as classification targets is an approximation. | Clearly label as engagement-based proxy. Recommend collecting actual star ratings for validation. |
-| 7 | **Ethical Data Usage** | User-generated content collected without explicit consent for analytics. | Remove personal identifiers. Comply with platform ToS. Do not re-publish individual comments. |
-| 8 | **Language Limitation** | English-only analysis excludes global markets (China, Latin America, Europe). | Note geographic scope limitation. |
+| 4 | **Temporal Bias** | Reddit and YouTube data reflects recent posts only. Historical trends cannot be inferred. | Disclose recency window in all findings. |
+| 5 | **Proxy Rating** | Reddit upvotes and YouTube likes are engagement signals, not product quality ratings. Using them as classification targets is an approximation. | Clearly label as engagement-based proxy. Recommend collecting actual star ratings for validation. |
+| 6 | **Ethical Data Usage** | User-generated content collected without explicit consent for analytics. | Remove personal identifiers. Comply with platform ToS. Do not re-publish individual comments. |
+| 7 | **Language Limitation** | English-only analysis excludes global markets (China, Latin America, Europe). | Note geographic scope limitation. |
 
 > **Client Disclosure:** All findings should be interpreted as directional signals, not statistically representative of all Nike customers. Recommend follow-up quantitative survey to validate key hypotheses before major strategic shifts.
 
 ------------------------------------------------------------------------
 
-# 12. Appendix: Session Info
+# 11. Appendix: Session Info
 
 ```{r session-info}
 sessionInfo()
