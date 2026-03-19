@@ -606,11 +606,51 @@ ggplot(price_summary, aes(x = brand, y = avg_sentiment, fill = `Mentions Price`)
 # ─────────────────────────────────────────────────────────────────────────────
 # Check for sustainability and greenwashing language presence
 # ─────────────────────────────────────────────────────────────────────────────
-sustainability_terms <- c(
+read_terms_file <- function(path, fallback_terms, label) {
+  if (!file.exists(path)) {
+    message(sprintf("%s file not found at '%s'. Using fallback terms.", label, path))
+    return(unique(SnowballC::wordStem(tolower(fallback_terms), language = "en")))
+  }
+
+  raw_lines <- tryCatch(
+    readr::read_lines(path, progress = FALSE),
+    error = function(e) character()
+  )
+
+  parsed <- raw_lines %>%
+    stringr::str_replace_all("#.*$", "") %>%
+    stringr::str_split(pattern = "[,;]") %>%
+    purrr::flatten_chr() %>%
+    stringr::str_trim() %>%
+    purrr::discard(~ .x == "")
+
+  if (length(parsed) == 0) {
+    message(sprintf("%s file is empty at '%s'. Using fallback terms.", label, path))
+    return(unique(SnowballC::wordStem(tolower(fallback_terms), language = "en")))
+  }
+
+  unique(SnowballC::wordStem(tolower(parsed), language = "en"))
+}
+
+default_sustainability_terms <- c(
   "sustain", "recycl", "green", "environ", "eco", "carbon",
   "climat", "planet", "renew", "biodeg", "organ"
 )
-greenwash_terms <- c("greenwash", "fakegrn", "virtue", "scam", "pretend", "market")
+default_greenwash_terms <- c("greenwash", "fakegrn", "virtue", "scam", "pretend", "market")
+
+sustainability_terms <- read_terms_file(
+  path = file.path("data", "sustainability_terms.txt"),
+  fallback_terms = default_sustainability_terms,
+  label = "Sustainability terms"
+)
+greenwash_terms <- read_terms_file(
+  path = file.path("data", "greenwashing_terms.txt"),
+  fallback_terms = default_greenwash_terms,
+  label = "Greenwashing terms"
+)
+
+cat(sprintf("Loaded %d sustainability stems and %d greenwashing stems.\n",
+            length(sustainability_terms), length(greenwash_terms)))
 
 sus_flagged <- tokens %>%
   mutate(
