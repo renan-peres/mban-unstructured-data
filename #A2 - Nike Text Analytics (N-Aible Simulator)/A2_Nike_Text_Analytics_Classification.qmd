@@ -131,7 +131,17 @@ if (!interactive()) {
 }
 ```
 
-# 1. Business Framing and Decision Context
+## How to Read This Notebook
+
+This notebook is organized as a decision pipeline from business framing to strategic recommendations:
+
+1. **Context and hypotheses** define the decisions we need to support.
+2. **Data pipeline and ingestion** establish what was collected and how it is standardized.
+3. **Nike baseline (Phase 1)** provides a focused single-brand view.
+4. **Cross-brand diagnostics (Phases 2-6)** expand to comparative NLP, sentiment, topics, and networks.
+5. **Executive synthesis** consolidates findings into practical actions for Nike leadership.
+
+# 1. Executive Brief and Decision Context
 
 ## Client Overview
 
@@ -165,9 +175,11 @@ Based on preliminary industry context, we test the following:
 
 If sizing/quality complaints drive even a 2% increase in return rates on flagship lines, the revenue impact on Nike's \$51B annual footwear revenue is approximately **\$1B** in processing and lost-sale costs. Identifying these signals early is a material strategic advantage.
 
+With the decision context established, the next section explains the data pipeline that feeds the analysis.
+
 ------------------------------------------------------------------------
 
-# 2. Data Collection Strategy
+# 2. Data Pipeline and Collection Design
 
 ## Data Architecture
 
@@ -184,11 +196,15 @@ Data collection is handled by a **separate R script** (`00_data_collection.R`) t
 
 Both sources satisfy the assignment requirement of collecting text from **at least two channels**.
 
+After defining architecture and sources, we move into ingestion and integrity checks before modeling.
+
 ------------------------------------------------------------------------
 
-# 3. Data Loading
+# 3. Data Ingestion and Quality Checks
 
 The CSVs produced by `00_data_collection.R` are loaded below. Each file contains columns: `text`, `rating`, `source`, `brand`, `doc_id`.
+
+This section performs three steps in sequence: load each source, combine into a standardized master table, and validate composition by brand/source.
 
 ```{r load-csv-data}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,9 +352,11 @@ raw_text %>%
   )
 ```
 
+With ingestion validated, we first isolate Nike to establish a clean single-brand baseline before comparative analysis.
+
 ------------------------------------------------------------------------
 
-# 4. Nike-Only Analysis
+# 4. Phase 1: Nike Baseline
 
 To align with the core Nike use case in this codebase, we first run a focused Nike-only baseline before the cross-brand comparisons.
 
@@ -398,6 +416,8 @@ nike_text %>%
 
 ## 4.1 Top Frequent Terms
 
+The first diagnostic highlights dominant term stems in Nike-only documents to identify core conversation themes.
+
 ```{r nike-only-top-terms, fig.height=5}
 # ─────────────────────────────────────────────────────────────────────────────
 # Top terms for Nike-only baseline
@@ -416,6 +436,8 @@ nike_tokens %>%
 ```
 
 ## 4.2 Lexicon Sentiment Snapshot
+
+We then compare sentiment lexicons to ensure directional consistency before scaling to cross-brand sentiment diagnostics.
 
 ```{r nike-only-nrc, fig.height=5}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -520,11 +542,15 @@ ggplot(lexicon_compare, aes(method, sentiment, fill = method)) +
   )
 ```
 
+After confirming the Nike baseline signal, we broaden the pipeline to a full three-brand comparative view.
+
 ------------------------------------------------------------------------
 
-# 5. Cross-Brand Comparisons (Nike vs Adidas vs Under Armour)
+# 5. Phase 2: Cross-Brand NLP Foundation (Nike vs Adidas vs Under Armour)
 
 ## 5.1 Tokenization, Stopword Removal, and Stemming
+
+This preprocessing block creates the reusable `tokens` object used by all downstream cross-brand analyses.
 
 ```{r preprocessing}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -576,6 +602,8 @@ tokens %>%
 
 ## 5.2 Bigrams (N-grams)
 
+Bigrams add phrase-level context, complementing unigram frequencies from the previous step.
+
 ```{r bigrams, fig.height=8}
 # ─────────────────────────────────────────────────────────────────────────────
 # Extract and visualize top bigrams by brand
@@ -608,6 +636,8 @@ bigrams %>%
 
 ## 5.3 Document-Term Matrix (DTM)
 
+The DTM provides the sparse matrix representation needed for topic modeling and other term-based methods.
+
 ```{r dtm}
 # ─────────────────────────────────────────────────────────────────────────────
 # Construct DTM from stemmed tokens
@@ -622,11 +652,17 @@ cat(sprintf(
 ))
 ```
 
+With a standardized token and matrix foundation in place, we can now test sentiment-related hypotheses across brands.
+
 ------------------------------------------------------------------------
 
-# 6. Cross-Brand Lexicon-Based Sentiment Analysis
+# 6. Phase 3: Cross-Brand Sentiment Diagnostics
+
+This section addresses H1, H3, and H4 by combining emotion distributions, document sentiment scores, pricing language, and sustainability/greenwashing signals.
 
 ## 6.1 NRC Emotion Breakdown by Brand
+
+We start with emotional composition to understand *how* each brand is discussed, beyond simple positive/negative polarity.
 
 ```{r nrc-emotions, fig.height=7}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -694,6 +730,8 @@ if (nrow(nrc_pct) == 0) {
 ```
 
 ## 6.2 Bing Sentiment by Brand and Source
+
+Next, we compute document-level sentiment and compare both central tendency and distribution by brand and channel.
 
 ```{r bing-sentiment}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -785,6 +823,8 @@ if (nrow(source_sentiment) > 1 && n_distinct(source_sentiment$source) > 1) {
 
 ## 6.3 Pricing Sentiment Analysis (H4)
 
+This subsection tests whether price-related language is systematically associated with lower sentiment.
+
 ```{r pricing-sentiment, fig.height=5}
 # ─────────────────────────────────────────────────────────────────────────────
 # Test H4: Do comments mentioning price terms have lower sentiment?
@@ -813,6 +853,8 @@ ggplot(price_summary, aes(x = brand, y = avg_sentiment, fill = `Mentions Price`)
 ```
 
 ## 6.4 Sustainability Language Check (H3)
+
+Finally, we quantify sustainability and greenwashing language prevalence as an early indicator of messaging credibility risk.
 
 ```{r sustainability-check}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -868,9 +910,13 @@ sus_summary %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+After validating sentiment signals, we shift from polarity to latent themes using topic modeling.
+
 ------------------------------------------------------------------------
 
-# 7. Cross-Brand Topic Modeling (LDA)
+# 7. Phase 4: Topic Discovery (LDA)
+
+LDA reveals hidden conversation clusters that are not obvious from sentiment scores alone.
 
 ```{r lda-model, fig.height=8}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -953,9 +999,13 @@ topic_terms %>%
 
 > **Interpretation guidance:** Label each topic based on the terms. For example, if Topic 1 contains "run, mile, track, pace" it maps to "Running Performance." Map topics to strategic questions (product quality, pricing complaints, sustainability, etc.).
 
+With latent topics identified, we next isolate which terms most clearly differentiate each brand's language.
+
 ------------------------------------------------------------------------
 
-# 8. Cross-Brand TF-IDF Brand Differentiation
+# 8. Phase 5: Brand Differentiation (TF-IDF)
+
+TF-IDF complements LDA by surfacing high-signal terms that are distinctive for each brand.
 
 ```{r tfidf-brand, fig.height=8}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -993,9 +1043,13 @@ tfidf_brand %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+We then move from distinctive terms to relationship structure by mapping keyword co-occurrence networks.
+
 ------------------------------------------------------------------------
 
-# 9. Cross-Brand Keyword Co-Occurrence Network
+# 9. Phase 6: Keyword Relationship Network
+
+This network view captures how terms cluster together in the same documents, highlighting concept ecosystems rather than isolated keywords.
 
 ```{r cooccurrence-network, fig.height=8, fig.width=10}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1049,11 +1103,15 @@ pair_counts %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+The final step consolidates all diagnostics into executive findings and action-oriented recommendations.
+
 ------------------------------------------------------------------------
 
-# 10. Findings & Strategic Recommendations
+# 10. Executive Synthesis and Recommendations
 
 ## Summary of Key Findings
+
+The summary table below is generated directly from computed objects in prior sections to preserve traceability from code to recommendations.
 
 ```{r findings-summary}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1106,6 +1164,8 @@ findings %>%
 
 ## Detailed Strategic Recommendations
 
+The recommendations are grouped by the same decision pillars introduced in Section 1 for consistency with stakeholder priorities.
+
 ### Brand Strategy
 
 -   **Emotional Drivers:** Trust, anticipation, and joy are Nike's strongest emotional associations. These should anchor marketing narratives.
@@ -1130,7 +1190,9 @@ findings %>%
 
 ------------------------------------------------------------------------
 
-# 11. Limitations, Risk Controls & Ethical Considerations
+# 11. Governance: Limitations, Risk Controls, and Ethics
+
+Before finalizing decisions, we document known analytical constraints and controls to support responsible interpretation.
 
 | \# | Limitation | Impact | Mitigation |
 |-----------------|-------------------|-----------------|---------------------|
@@ -1143,6 +1205,8 @@ findings %>%
 | 7 | **Language Limitation** | English-only analysis excludes global markets (China, Latin America, Europe). | Note geographic scope limitation. |
 
 > **Client Disclosure:** All findings should be interpreted as directional signals, not statistically representative of all Nike customers. Recommend follow-up quantitative survey to validate key hypotheses before major strategic shifts.
+
+For reproducibility, the appendix reports runtime and package/session metadata.
 
 ------------------------------------------------------------------------
 
