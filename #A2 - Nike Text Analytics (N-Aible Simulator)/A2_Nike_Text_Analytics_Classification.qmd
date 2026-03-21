@@ -397,7 +397,11 @@ nike_tokens <- nike_text %>%
   unnest_tokens(word, text) %>%
   filter(str_detect(word, "^[a-z]{2,}$")) %>%
   filter(!word %in% nike_all_stop) %>%
-  mutate(stem = SnowballC::wordStem(word, language = "en"))
+  mutate(
+    word = if_else(word == "nmds", "nmd", word),
+    stem = SnowballC::wordStem(word, language = "en"),
+    stem = if_else(stem == "nmds", "nmd", stem)
+  )
 
 cat(sprintf(
   "Nike-only baseline: %s documents and %s cleaned tokens.\n",
@@ -571,7 +575,11 @@ tokens <- raw_text %>%
   unnest_tokens(word, text) %>%
   filter(str_detect(word, "^[a-z]{2,}$")) %>%
   filter(!word %in% all_stop) %>%
-  mutate(stem = SnowballC::wordStem(word, language = "en"))
+  mutate(
+    word = if_else(word == "nmds", "nmd", word),
+    stem = SnowballC::wordStem(word, language = "en"),
+    stem = if_else(stem == "nmds", "nmd", stem)
+  )
 
 cat(sprintf(
   "Tokenization complete: %s tokens from %s documents.\n",

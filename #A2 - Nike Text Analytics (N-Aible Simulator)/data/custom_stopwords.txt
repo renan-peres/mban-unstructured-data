@@ -4,11 +4,16 @@ amp
 www
 og
 com
+data
 https
 preview
 width
+para
 format
 gif
+auto
+blog
+zoom
 jpeg width
 format pjpg
 preview redd

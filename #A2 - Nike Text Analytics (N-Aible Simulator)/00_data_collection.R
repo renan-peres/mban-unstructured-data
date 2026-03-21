@@ -386,7 +386,7 @@ adidas_reddit <- extract_reddit_brand(
 # ── Under Armour ──
 cat("\n[Under Armour]\n")
 ua_reddit <- extract_reddit_brand(
-  keywords   = c("Under Armour"),
+  keywords   = c("Under Armour", "UA"),
   subreddits = c("UnderArmour", common_sport_subreddits),
   brand_name = "Under Armour",
   max_threads_per_sub = 8
@@ -460,13 +460,16 @@ get_youtube_comments <- function(video_id, api_key, max_results = 100) {
 
 # ── Search across Nike-focused queries ──
 yt_queries <- c(
-  "Nike shoe review 2025",
-  "Nike shoe review 2024",
-  "Nike vs Adidas",
+  "Nike review 2025",
+  "Nike review 2024",
+  "Adidas review 2025",
+  "Adidas review 2024",
+  "Under Armour review 2025",
+  "Under Armour review 2024",
   "Nike sustainability",
   "Nike pricing worth it",
-  "Adidas shoe review 2025",
-  "Under Armour shoe review 2025"
+  "Nike vs Adidas",
+  "Nike vs Under Armour"
 )
 
 cat("Searching YouTube for videos...\n")
