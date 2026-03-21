@@ -63,7 +63,7 @@ cat(strrep("=", 60), "\n\n")
 
 reddit_request_pause <- 1.5
 reddit_rate_limit_wait <- 60
-reddit_max_attempts <- 5
+reddit_max_attempts <- 3
 
 extract_reddit_brand <- function(keywords, subreddits, brand_name,
                                  max_threads_per_sub = 10) {
@@ -371,7 +371,7 @@ nike_reddit <- extract_reddit_brand(
   keywords   = c("Nike"),
   subreddits = c("Nike", common_sport_subreddits),
   brand_name = "Nike",
-  max_threads_per_sub = 8
+  max_threads_per_sub = 15
 )
 
 # ── Adidas ──
@@ -380,7 +380,7 @@ adidas_reddit <- extract_reddit_brand(
   keywords   = c("Adidas"),
   subreddits = c("adidas", common_sport_subreddits),
   brand_name = "Adidas",
-  max_threads_per_sub = 8
+  max_threads_per_sub = 15
 )
 
 # ── Under Armour ──
@@ -389,7 +389,7 @@ ua_reddit <- extract_reddit_brand(
   keywords   = c("Under Armour", "UA"),
   subreddits = c("UnderArmour", common_sport_subreddits),
   brand_name = "Under Armour",
-  max_threads_per_sub = 8
+  max_threads_per_sub = 15
 )
 
 # Combine and save
@@ -458,7 +458,7 @@ get_youtube_comments <- function(video_id, api_key, max_results = 100) {
   )
 }
 
-# ── Search across Nike-focused queries ──
+# ── Search across queries ──
 yt_queries <- c(
   "Nike review 2025",
   "Nike review 2024",

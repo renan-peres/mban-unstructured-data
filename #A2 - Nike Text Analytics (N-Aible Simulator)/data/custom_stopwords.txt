@@ -2,7 +2,6 @@ br
 href
 amp
 www
-og
 com
 data
 https
