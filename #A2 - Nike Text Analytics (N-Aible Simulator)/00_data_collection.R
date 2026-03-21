@@ -368,7 +368,7 @@ common_sport_subreddits <- c(
 # ── Nike ──
 cat("\n[Nike]\n")
 nike_reddit <- extract_reddit_brand(
-  keywords   = c("Nike", "Nike shoes", "Air Max", "Pegasus", "Jordan"),
+  keywords   = c("Nike"),
   subreddits = c("Nike", common_sport_subreddits),
   brand_name = "Nike",
   max_threads_per_sub = 8
@@ -377,7 +377,7 @@ nike_reddit <- extract_reddit_brand(
 # ── Adidas ──
 cat("\n[Adidas]\n")
 adidas_reddit <- extract_reddit_brand(
-  keywords   = c("Adidas", "Adidas shoes", "Ultraboost", "Samba"),
+  keywords   = c("Adidas"),
   subreddits = c("adidas", common_sport_subreddits),
   brand_name = "Adidas",
   max_threads_per_sub = 8
@@ -386,7 +386,7 @@ adidas_reddit <- extract_reddit_brand(
 # ── Under Armour ──
 cat("\n[Under Armour]\n")
 ua_reddit <- extract_reddit_brand(
-  keywords   = c("Under Armour", "UA shoes", "HOVR"),
+  keywords   = c("Under Armour"),
   subreddits = c("UnderArmour", common_sport_subreddits),
   brand_name = "Under Armour",
   max_threads_per_sub = 8
