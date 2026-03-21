@@ -61,8 +61,83 @@ cat("\n", strrep("=", 60), "\n")
 cat("  REDDIT DATA EXTRACTION\n")
 cat(strrep("=", 60), "\n\n")
 
+reddit_request_pause <- 1.5
+reddit_rate_limit_wait <- 60
+reddit_max_attempts <- 5
+
 extract_reddit_brand <- function(keywords, subreddits, brand_name,
                                  max_threads_per_sub = 10) {
+  
+  is_rate_limit_error <- function(message_text) {
+    if (is.null(message_text) || length(message_text) == 0 || is.na(message_text)) {
+      return(FALSE)
+    }
+    
+    stringr::str_detect(
+      stringr::str_to_lower(message_text),
+      paste(
+        c(
+          "rate limit",
+          "too many requests",
+          "http 429",
+          "status code 429",
+          "max extraction",
+          "try again later",
+          "cannot open the connection",
+          "connection reset",
+          "timed out",
+          "timeout was reached"
+        ),
+        collapse = "|"
+      )
+    )
+  }
+  
+  wait_for_reddit_limit <- function(attempt, retry_after = NULL, context = "Reddit request") {
+    retry_value <- retry_after
+    if (length(retry_value) == 0 || is.null(retry_value)) {
+      retry_value <- NA_character_
+    } else {
+      retry_value <- retry_value[[1]]
+    }
+    
+    wait_seconds <- suppressWarnings(as.numeric(retry_value))
+    
+    if (length(wait_seconds) == 0 || is.na(wait_seconds[[1]]) ||
+        !is.finite(wait_seconds[[1]]) || wait_seconds[[1]] <= 0) {
+      wait_seconds <- reddit_rate_limit_wait * attempt
+    } else {
+      wait_seconds <- wait_seconds[[1]]
+    }
+    
+    wait_seconds <- min(wait_seconds, 10 * 60)
+    cat(sprintf("    [Wait] %s throttled. Sleeping for %.0f seconds before retrying...\n",
+                context, wait_seconds))
+    Sys.sleep(wait_seconds)
+  }
+  
+  call_with_reddit_backoff <- function(expr, context, max_attempts = reddit_max_attempts) {
+    for (attempt in seq_len(max_attempts)) {
+      result <- tryCatch(expr(), error = identity)
+      
+      if (!inherits(result, "error")) {
+        return(result)
+      }
+      
+      if (attempt < max_attempts && is_rate_limit_error(conditionMessage(result))) {
+        wait_for_reddit_limit(attempt = attempt, context = context)
+      } else {
+        if (attempt < max_attempts) {
+          Sys.sleep(reddit_request_pause * attempt)
+        } else {
+          message(sprintf("    [Skip] %s failed after %d attempts: %s",
+                          context, max_attempts, conditionMessage(result)))
+        }
+      }
+    }
+    
+    NULL
+  }
   
   safe_get_json <- function(url, max_attempts = 4, pause_seconds = 1.5) {
     ua <- "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -87,6 +162,19 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
           error = function(e) NULL
         )
         if (!is.null(parsed)) return(parsed)
+      }
+      
+      if (!is.null(resp) && httr::status_code(resp) == 429 && attempt < max_attempts) {
+        retry_after <- httr::headers(resp)[["retry-after"]]
+        if (is.null(retry_after)) {
+          retry_after <- httr::headers(resp)[["x-ratelimit-reset"]]
+        }
+        wait_for_reddit_limit(
+          attempt = attempt,
+          retry_after = retry_after,
+          context = "Reddit JSON API"
+        )
+        next
       }
       
       if (attempt < max_attempts) {
@@ -119,12 +207,16 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
       return(tibble::tibble(url = character()))
     }
     
+    if (!"url_overridden_by_dest" %in% names(posts_df)) {
+      posts_df$url_overridden_by_dest <- NA_character_
+    }
+    
     threads <- posts_df %>%
       dplyr::transmute(
         url = dplyr::if_else(
-          !is.na(url_overridden_by_dest) & stringr::str_detect(url_overridden_by_dest, "^https?://"),
-          url_overridden_by_dest,
-          paste0("https://www.reddit.com", permalink)
+          !is.na(.data$url_overridden_by_dest) & stringr::str_detect(.data$url_overridden_by_dest, "^https?://"),
+          .data$url_overridden_by_dest,
+          paste0("https://www.reddit.com", .data$permalink)
         )
       ) %>%
       dplyr::filter(stringr::str_detect(url, "/comments/")) %>%
@@ -171,18 +263,18 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
   
   all_comments <- list()
   
-  for (sub in subreddits) {
+  for (sub in unique(subreddits)) {
     for (kw in keywords) {
       cat(sprintf("  Searching r/%s for '%s'...\n", sub, kw))
       
-      urls_df <- tryCatch(
-        find_thread_urls(
+      urls_df <- call_with_reddit_backoff(
+        expr = function() find_thread_urls(
           keywords  = kw,
           subreddit = sub,
           sort_by   = "top",
           period    = "year"
         ),
-        error = function(e) NULL
+        context = sprintf("find_thread_urls(r/%s, '%s')", sub, kw)
       )
       
       if (is.null(urls_df) || !is.data.frame(urls_df) || nrow(urls_df) == 0) {
@@ -199,9 +291,9 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
       clean <- tibble::tibble()
       
       # First try RedditExtractoR parser (often works even when direct JSON is blocked).
-      thread_data <- tryCatch(
-        get_thread_content(thread_urls),
-        error = function(e) NULL
+      thread_data <- call_with_reddit_backoff(
+        expr = function() get_thread_content(thread_urls),
+        context = sprintf("get_thread_content(r/%s, '%s')", sub, kw)
       )
       
       if (!is.null(thread_data) &&
@@ -257,18 +349,27 @@ extract_reddit_brand <- function(keywords, subreddits, brand_name,
         cat("    [Skip] No comments collected from selected threads\n")
       }
       
-      Sys.sleep(1.2)
+      Sys.sleep(reddit_request_pause)
     }
   }
   
   dplyr::bind_rows(all_comments)
 }
 
+# Shared sports-related channels plus brand-specific communities.
+common_sport_subreddits <- c(
+  "Sneakers",
+  "RunningShoeGeeks",
+  "Running",
+  "BasketballShoes",
+  "trailrunning"
+)
+
 # ── Nike ──
 cat("\n[Nike]\n")
 nike_reddit <- extract_reddit_brand(
   keywords   = c("Nike", "Nike shoes", "Air Max", "Pegasus", "Jordan"),
-  subreddits = c("Sneakers", "Nike", "RunningShoeGeeks"),
+  subreddits = c("Nike", common_sport_subreddits),
   brand_name = "Nike",
   max_threads_per_sub = 8
 )
@@ -277,7 +378,7 @@ nike_reddit <- extract_reddit_brand(
 cat("\n[Adidas]\n")
 adidas_reddit <- extract_reddit_brand(
   keywords   = c("Adidas", "Adidas shoes", "Ultraboost", "Samba"),
-  subreddits = c("Sneakers", "Adidas", "RunningShoeGeeks"),
+  subreddits = c("adidas", common_sport_subreddits),
   brand_name = "Adidas",
   max_threads_per_sub = 8
 )
@@ -286,7 +387,7 @@ adidas_reddit <- extract_reddit_brand(
 cat("\n[Under Armour]\n")
 ua_reddit <- extract_reddit_brand(
   keywords   = c("Under Armour", "UA shoes", "HOVR"),
-  subreddits = c("Sneakers", "UnderArmour", "RunningShoeGeeks"),
+  subreddits = c("UnderArmour", common_sport_subreddits),
   brand_name = "Under Armour",
   max_threads_per_sub = 8
 )
