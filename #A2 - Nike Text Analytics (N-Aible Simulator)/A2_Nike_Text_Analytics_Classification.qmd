@@ -318,6 +318,25 @@ cat(sprintf(
   n_distinct(raw_text$source),
   n_distinct(raw_text$brand)
 ))
+
+# Load shared stopword resources once so the same custom list applies
+# to Nike-only and full-corpus analyses.
+custom_stop <- read_terms_from_github(
+  url = github_custom_stopwords_url,
+  label = "custom stopwords",
+  stem = FALSE
+)
+
+all_stop <- unique(c(
+  tidytext::stop_words$word,
+  stopwords::stopwords("en"),
+  custom_stop
+))
+
+cat(sprintf(
+  "Loaded %s custom stopwords for full-corpus preprocessing.\n",
+  format(length(custom_stop), big.mark = ",")
+))
 ```
 
 ```{r data-summary-table}
@@ -371,17 +390,7 @@ if (nrow(nike_text) == 0) {
   stop("No Nike documents found after data loading and brand normalization.")
 }
 
-nike_custom_stop <- read_terms_from_github(
-  url = github_custom_stopwords_url,
-  label = "custom stopwords",
-  stem = FALSE
-)
-
-nike_all_stop <- unique(c(
-  tidytext::stop_words$word,
-  stopwords::stopwords("en"),
-  nike_custom_stop
-))
+nike_all_stop <- all_stop
 
 nike_tokens <- nike_text %>%
   select(doc_id, source, rating, text) %>%
@@ -554,20 +563,8 @@ This preprocessing block creates the reusable `tokens` object used by all downst
 
 ```{r preprocessing}
 # ─────────────────────────────────────────────────────────────────────────────
-# Build stopword list: standard English + GitHub custom terms file
+# Build full-corpus tokens using the shared stopword list
 # ─────────────────────────────────────────────────────────────────────────────
-custom_stop <- read_terms_from_github(
-  url = github_custom_stopwords_url,
-  label = "custom stopwords",
-  stem = FALSE
-)
-
-all_stop <- unique(c(
-  tidytext::stop_words$word,
-  stopwords::stopwords("en"),
-  custom_stop
-))
-
 # Tokenize, filter, stem
 tokens <- raw_text %>%
   select(doc_id, source, brand, product_line, rating, date, text) %>%
