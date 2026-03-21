@@ -5,6 +5,9 @@ www
 og
 com
 https
+preview
+width
+format
 gif
 jpeg width
 format pjpg

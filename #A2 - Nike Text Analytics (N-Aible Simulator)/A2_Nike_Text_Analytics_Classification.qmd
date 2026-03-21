@@ -1053,17 +1053,22 @@ This network view captures how terms cluster together in the same documents, hig
 
 ```{r cooccurrence-network, fig.height=8, fig.width=10}
 # ─────────────────────────────────────────────────────────────────────────────
-# Co-occurrence network using pairwise_count (widyr)
+# Pairwise correlation network using widyr
 # ─────────────────────────────────────────────────────────────────────────────
-pair_counts <- raw_text %>%
-  select(doc_id, text) %>%
-  unnest_tokens(word, text) %>%
-  filter(str_detect(word, "^[a-z]{2,}$"), !word %in% all_stop) %>%
-  pairwise_count(word, doc_id, sort = TRUE, upper = FALSE)
+# Keep one record per document-term pair, then remove very rare terms
+pairwise_terms <- tokens %>%
+  select(doc_id, stem) %>%
+  distinct() %>%
+  add_count(stem, name = "doc_freq") %>%
+  filter(doc_freq >= 5)
 
-# Select top co-occurring pairs (97th percentile threshold)
+pair_counts <- pairwise_terms %>%
+  pairwise_cor(stem, doc_id, sort = TRUE, upper = FALSE)
+
+# Plot only the strongest correlations to avoid the hairball effect
 top_pairs <- pair_counts %>%
-  filter(n >= quantile(n, 0.97, na.rm = TRUE))
+  filter(correlation >= 0.20) %>%
+  slice_head(n = 80)
 
 if (nrow(top_pairs) > 2) {
   graph <- top_pairs %>%
@@ -1073,14 +1078,15 @@ if (nrow(top_pairs) > 2) {
   V(graph)$centrality <- degree(graph)
 
   ggraph(graph, layout = "fr") +
-    geom_edge_link(aes(width = n), alpha = 0.25, color = "gray50") +
-    geom_node_point(aes(size = centrality), color = "#F46B2F", alpha = 0.7) +
-    geom_node_text(aes(label = name), repel = TRUE, size = 3.5, max.overlaps = 20) +
-    scale_edge_width(range = c(0.3, 2.5), guide = "none") +
-    scale_size_continuous(range = c(2, 8), guide = "none") +
+    geom_edge_link(aes(edge_alpha = correlation, edge_width = correlation), color = "gray55") +
+    geom_node_point(aes(size = centrality), color = "#F46B2F", alpha = 0.8) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 3.3, max.overlaps = 40) +
+    scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
+    scale_edge_width(range = c(0.2, 1.8), guide = "none") +
+    scale_size_continuous(range = c(2.5, 7), guide = "none") +
     labs(
       title    = "Keyword Co-Occurrence Network",
-      subtitle = "Nodes = words; edges = co-occurrence in same document (top 3% pairs)"
+      subtitle = "Nodes = stemmed terms; edges = strongest pairwise correlations across documents"
     ) +
     theme_void() +
     theme(
@@ -1088,18 +1094,19 @@ if (nrow(top_pairs) > 2) {
       plot.subtitle = element_text(color = "grey40", size = 11)
     )
 } else {
-  cat("Not enough co-occurring pairs to build a meaningful network.\n")
+  cat("Not enough strongly correlated term pairs to build a meaningful network.\n")
 }
 ```
 
 ```{r cooccurrence-table}
 # ─────────────────────────────────────────────────────────────────────────────
-# Top 20 co-occurring word pairs
+# Top 20 pairwise term correlations
 # ─────────────────────────────────────────────────────────────────────────────
 pair_counts %>%
   slice_head(n = 20) %>%
-  rename(`Word 1` = item1, `Word 2` = item2, `Co-occurrences` = n) %>%
-  kable(caption = "Top 20 Keyword Co-Occurrence Pairs") %>%
+  mutate(correlation = round(correlation, 3)) %>%
+  rename(`Term 1` = item1, `Term 2` = item2, `Correlation` = correlation) %>%
+  kable(caption = "Top 20 Keyword Pairwise Correlations") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
