@@ -156,7 +156,7 @@ Nike's leadership has observed: (1) increasing online conversation around sustai
 Our analysis is scoped to the following **four business questions**:
 
 | \# | Pillar | Question |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | 1 | Brand Perception | What is the overall sentiment toward Nike across online conversations? |
 | 2 | Product Strategy | Which Nike product lines are most associated with negative traits (e.g., sizing, durability, comfort)? |
 | 3 | Sustainability | Is Nike's sustainability messaging resonating, or is greenwashing language appearing? |
@@ -188,7 +188,7 @@ Data collection is handled by a **separate R script** (`00_data_collection.R`) t
 **Step 1 (run once):** Execute `source("00_data_collection.R")` in your R console. This produces:
 
 | File | Source | API / Package | Contents |
-|----|----|----|----|
+|------------------|------------------|------------------|------------------|
 | `data/reddit_comments.csv` | Reddit (r/Sneakers, r/Nike, r/RunningShoeGeeks) | `RedditExtractoR` | Comments for Nike, Adidas, Under Armour |
 | `data/youtube_comments.csv` | YouTube sneaker reviews | `httr` + YouTube Data API v3 | Comments from Nike/Adidas/UA review videos |
 
@@ -221,6 +221,7 @@ youtube_url                 <- paste0(github_data_base_url, "/youtube_comments.c
 github_custom_stopwords_url <- paste0(github_data_base_url, "/custom_stopwords.txt")
 github_sustainability_url   <- paste0(github_data_base_url, "/sustainability_terms.txt")
 github_greenwashing_url     <- paste0(github_data_base_url, "/greenwashing_terms.txt")
+github_product_segments     <- paste0(github_data_base_url, "/nike_product_segments.txt")
 
 # Read and normalize external terms from GitHub text files
 read_terms_from_github <- function(url, label, stem = FALSE) {
@@ -876,6 +877,12 @@ greenwash_terms <- read_terms_from_github(
   stem = TRUE
 )
 
+nike_product_segments <- read_terms_from_github(
+  url = github_product_segments,
+  label = "product segments",
+  stem = TRUE
+)
+
 cat(sprintf("Loaded %d sustainability stems and %d greenwashing stems.\n",
             length(sustainability_terms), length(greenwash_terms)))
 
@@ -913,6 +920,115 @@ sus_summary %>%
   ) %>%
   kable(caption = "H3: Sustainability and Greenwashing Language by Brand") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r sustainability-check}
+# ─────────────────────────────────────────────────────────────
+# Word-level ranking for Sustainability & Greenwashing (Nike only)
+# ─────────────────────────────────────────────────────────────
+library(ggplot2)
+library(dplyr)
+library(tidytext)
+library(patchwork)
+
+# -----------------------------
+# 1. Sustainability word ranking
+# -----------------------------
+nike_sus_words <- tokens %>%
+  filter(brand == "Nike") %>%
+  mutate(is_sus = stem %in% sustainability_terms) %>%
+  filter(is_sus) %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10)
+
+p1 <- nike_sus_words %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = word, y = n)) +
+  geom_col(fill = "#2E8B57") +
+  coord_flip() +
+  labs(
+    title = "Nike Sustainability Vocabulary",
+    subtitle = "Top 10 sustainability-related terms",
+    x = NULL,
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+# -----------------------------
+# 2. Greenwashing word ranking
+# -----------------------------
+nike_green_words <- tokens %>%
+  filter(brand == "Nike") %>%
+  mutate(is_green = stem %in% greenwash_terms) %>%
+  filter(is_green) %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10)
+
+p2 <- nike_green_words %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = word, y = n)) +
+  geom_col(fill = "#B22222") +
+  coord_flip() +
+  labs(
+    title = "Nike Greenwashing Vocabulary",
+    subtitle = "Top 10 greenwashing-related terms",
+    x = NULL,
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+# -----------------------------
+# 3.output
+# -----------------------------
+p1 / p2
+```
+
+```{r sustainability-check}
+# -----------------------------
+# Sustainabilityだけ
+# -----------------------------
+nike_sus_table <- nike_vocab_sentiment %>%
+  filter(Vocabulary == "Sustainability") %>%
+  slice_max(n, n = 10) %>%
+  select(
+    Category = Vocabulary,
+    Word = word,
+    Frequency = n,
+    Sentiment = sentiment
+  )
+
+nike_sus_table %>%
+  kable(caption = "Nike Sustainability Terms with Sentiment") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+
+# -----------------------------
+# Greenwashingだけ
+# -----------------------------
+bing_lex <- get_sentiments("bing")
+
+nike_green_table <- tokens %>%
+  filter(brand == "Nike") %>%
+  mutate(is_green = stem %in% greenwash_terms) %>%
+  filter(is_green) %>%
+  count(word, stem, sort = TRUE) %>%
+  left_join(bing_lex, by = c("stem" = "word")) %>%
+  mutate(
+    sentiment = replace_na(sentiment, "Not labeled"),
+    Vocabulary = "Greenwashing"
+  ) %>%
+  slice_max(n, n = 10) %>%
+  select(
+    Category = Vocabulary,
+    Word = word,
+    Frequency = n,
+    Sentiment = sentiment
+  )
+
+nike_green_table %>%
+  kable(caption = "Nike Greenwashing Terms with Sentiment") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
 ```
 
 After validating sentiment signals, we shift from polarity to latent themes using topic modeling.
@@ -1207,7 +1323,7 @@ The recommendations are grouped by the same decision pillars introduced in Secti
 Before finalizing decisions, we document known analytical constraints and controls to support responsible interpretation.
 
 | \# | Limitation | Impact | Mitigation |
-|----|----|----|----|
+|------------------|------------------|------------------|------------------|
 | 1 | **Sampling Bias** | Reddit skews younger/male/US; YouTube skews toward engaged sneaker enthusiasts. Neither represents all Nike customers. | Triangulate across both sources. Note demographic skew in all recommendations. |
 | 2 | **Fake/Manipulated Content** | Coordinated upvote manipulation or astroturfing can distort Reddit sentiment. Lexicon methods cannot reliably detect this. | Flag suspiciously short or repetitive comments. Note this limitation for client. |
 | 3 | **Lexicon Bias** | Dictionary-based sentiment (NRC/Bing) cannot detect sarcasm, negation (e.g., "not great"), or domain-specific slang common on Reddit. | Supplement with classification model and manual spot-checks. Consider contextual models for production. |

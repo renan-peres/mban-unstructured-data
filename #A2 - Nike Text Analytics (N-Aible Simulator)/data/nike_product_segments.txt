@@ -1,48 +1,195 @@
+## Running Shoes
 Pegasus
 Vaporfly
-Alphafly 3
-Zoom Fly 6
-Vomero 18
-Invincible 3
+Alphafly
+Zoom Fly
+Vomero
+Invincible
 Free RN
+React Infinity Run
+ZoomX Streakfly
+Tempo Next
+Structure
+Revolution
+Quest
+Winflo
+Epic React
+Air Zoom Tempo
+
+## Basketball Shoes
 LeBron
-Kobe 8 Protro
-Kobe 5
-Kobe 6
-Kobe 9
+Kobe
 KD
-Kyrie Infinity
+Kyrie
 Air Zoom G.T. Cut
-Ja 2
-Air Max 95 Big Bubble
+Ja
+Giannis
+Freak
+PG (Paul George)
+Book (Devin Booker)
+Sabrina
+Air More Uptempo
+Cosmic Unity
+Precision
+
+## Lifestyle & Casual Shoes
+Air Max 1
 Air Max 90
-Air Max Dn8
+Air Max 95
+Air Max 97
 Air Max Plus
+Air Max 270
+Air Max 2090
+VaporMax
 Air Force 1
 Dunk
 Air Jordan
-Shox Z
-Air Rift
-Air Superfly
 Blazer
 Cortez
-SB Dunk
+Tanjun
+Presto
 Huarache
-Nike Pro
-Nike Free
-Livestrong
+Air Rift
+M2K Tekno
+React Element
+Daybreak
+Waffle One
+Challenger OG
+Killshot
+
+## Training & Gym
+Metcon
+SuperRep
+Flex
+Free Metcon
+Air Zoom SuperRep
+React Metcon
+Romaleos
+
+## Soccer/Football
+Mercurial
+Phantom
+Tiempo
+Premier
+Hypervenom
+Magista
+
+## Skateboarding
+SB Dunk
+Janoski
+Nyjah
+Ishod
+Blazer Low SB
+Shane
+
+## Jordan Brand
+Air Jordan 1
+Air Jordan 3
+Air Jordan 4
+Air Jordan 5
+Air Jordan 6
+Air Jordan 11
+Air Jordan 12
+Jordan Delta
+Jordan Why Not
+Jordan Zion
+
+## Other Sports
+Air Zoom Victory (Golf)
+React Infinity Pro (Golf)
+Court (Tennis)
+Air Zoom Vapor (Tennis)
+Zoom Rival (Track)
+Zoom Victory (Track)
+
+## Apparel - Tops
+Dri-FIT
+Tech Fleece
+Windrunner
 hoodies
 sweatshirts
 jackets
+T-shirts
+Tank tops
+Jerseys
+Polo shirts
+Long sleeve shirts
+
+## Apparel - Bottoms
 pants
 shorts
+Leggings
+Tights
+Joggers
+Tracksuits
+Sweatpants
+
+## Apparel - Women's Specific
+Sports bras
+Yoga pants
+Athletic dresses
+Skirts
+
+## Apparel - Outerwear
+Windbreaker
+Puffer jackets
+Rain jackets
+Vests
+
+## Apparel - Specialty
 swimwear
+Nike Pro
+Livestrong
+ACG (All Conditions Gear)
+NikeLab
+ISPA
+
+## Accessories & Equipment
+bags
+Backpacks
+Duffel bags
+Gym sacks
 balls
-bats
-gloves
+Soccer balls
+Basketballs
+Footballs
+Socks
+Athletic socks
+Elite socks
+Headbands
+Wristbands
+Hats
+Caps
+Beanies
+Gloves
+Training gloves
+Golf gloves
+watches
+Apple Watch Nike
+Sunglasses
+Water bottles
 yoga mats
 weights
+Resistance bands
+Jump ropes
 knee pads
 shin guards
-bags
-watches
+Ankle braces
+Compression sleeves
+
+## Technologies & Features
+Flyknit
+Flywire
+ZoomX
+React
+Air Max
+Zoom Air
+Lunarlon
+Cushlon
+VaporMax
+Shox
+Free
+FlyEase
+Adapt (Auto-lacing)
+NBA Connected Jerseys
+Dri-FIT ADV
