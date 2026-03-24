@@ -135,11 +135,11 @@ if (!interactive()) {
 
 This notebook is organized as a decision pipeline from business framing to strategic recommendations:
 
-1. **Context and hypotheses** define the decisions we need to support.
-2. **Data pipeline and ingestion** establish what was collected and how it is standardized.
-3. **Nike baseline (Phase 1)** provides a focused single-brand view.
-4. **Cross-brand diagnostics (Phases 2-6)** expand to comparative NLP, sentiment, topics, and networks.
-5. **Executive synthesis** consolidates findings into practical actions for Nike leadership.
+1.  **Context and hypotheses** define the decisions we need to support.
+2.  **Data pipeline and ingestion** establish what was collected and how it is standardized.
+3.  **Nike baseline (Phase 1)** provides a focused single-brand view.
+4.  **Cross-brand diagnostics (Phases 2-6)** expand to comparative NLP, sentiment, topics, and networks.
+5.  **Executive synthesis** consolidates findings into practical actions for Nike leadership.
 
 # 1. Executive Brief and Decision Context
 
@@ -156,7 +156,7 @@ Nike's leadership has observed: (1) increasing online conversation around sustai
 Our analysis is scoped to the following **four business questions**:
 
 | \# | Pillar | Question |
-|------------------|------------------------|------------------------------|
+|----|----|----|
 | 1 | Brand Perception | What is the overall sentiment toward Nike across online conversations? |
 | 2 | Product Strategy | Which Nike product lines are most associated with negative traits (e.g., sizing, durability, comfort)? |
 | 3 | Sustainability | Is Nike's sustainability messaging resonating, or is greenwashing language appearing? |
@@ -188,7 +188,7 @@ Data collection is handled by a **separate R script** (`00_data_collection.R`) t
 **Step 1 (run once):** Execute `source("00_data_collection.R")` in your R console. This produces:
 
 | File | Source | API / Package | Contents |
-|-----------------|-----------------|-----------------------|-----------------|
+|----|----|----|----|
 | `data/reddit_comments.csv` | Reddit (r/Sneakers, r/Nike, r/RunningShoeGeeks) | `RedditExtractoR` | Comments for Nike, Adidas, Under Armour |
 | `data/youtube_comments.csv` | YouTube sneaker reviews | `httr` + YouTube Data API v3 | Comments from Nike/Adidas/UA review videos |
 
@@ -1207,7 +1207,7 @@ The recommendations are grouped by the same decision pillars introduced in Secti
 Before finalizing decisions, we document known analytical constraints and controls to support responsible interpretation.
 
 | \# | Limitation | Impact | Mitigation |
-|-----------------|-------------------|-----------------|---------------------|
+|----|----|----|----|
 | 1 | **Sampling Bias** | Reddit skews younger/male/US; YouTube skews toward engaged sneaker enthusiasts. Neither represents all Nike customers. | Triangulate across both sources. Note demographic skew in all recommendations. |
 | 2 | **Fake/Manipulated Content** | Coordinated upvote manipulation or astroturfing can distort Reddit sentiment. Lexicon methods cannot reliably detect this. | Flag suspiciously short or repetitive comments. Note this limitation for client. |
 | 3 | **Lexicon Bias** | Dictionary-based sentiment (NRC/Bing) cannot detect sarcasm, negation (e.g., "not great"), or domain-specific slang common on Reddit. | Supplement with classification model and manual spot-checks. Consider contextual models for production. |
