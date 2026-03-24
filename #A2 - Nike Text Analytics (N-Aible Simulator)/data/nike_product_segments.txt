@@ -1,4 +1,3 @@
-## Running Shoes
 Pegasus
 Vaporfly
 Alphafly
@@ -15,8 +14,6 @@ Quest
 Winflo
 Epic React
 Air Zoom Tempo
-
-## Basketball Shoes
 LeBron
 Kobe
 KD
@@ -31,8 +28,6 @@ Sabrina
 Air More Uptempo
 Cosmic Unity
 Precision
-
-## Lifestyle & Casual Shoes
 Air Max 1
 Air Max 90
 Air Max 95
@@ -56,8 +51,6 @@ Daybreak
 Waffle One
 Challenger OG
 Killshot
-
-## Training & Gym
 Metcon
 SuperRep
 Flex
@@ -65,24 +58,18 @@ Free Metcon
 Air Zoom SuperRep
 React Metcon
 Romaleos
-
-## Soccer/Football
 Mercurial
 Phantom
 Tiempo
 Premier
 Hypervenom
 Magista
-
-## Skateboarding
 SB Dunk
 Janoski
 Nyjah
 Ishod
 Blazer Low SB
 Shane
-
-## Jordan Brand
 Air Jordan 1
 Air Jordan 3
 Air Jordan 4
@@ -93,16 +80,12 @@ Air Jordan 12
 Jordan Delta
 Jordan Why Not
 Jordan Zion
-
-## Other Sports
 Air Zoom Victory (Golf)
 React Infinity Pro (Golf)
 Court (Tennis)
 Air Zoom Vapor (Tennis)
 Zoom Rival (Track)
 Zoom Victory (Track)
-
-## Apparel - Tops
 Dri-FIT
 Tech Fleece
 Windrunner
@@ -114,8 +97,6 @@ Tank tops
 Jerseys
 Polo shirts
 Long sleeve shirts
-
-## Apparel - Bottoms
 pants
 shorts
 Leggings
@@ -123,28 +104,20 @@ Tights
 Joggers
 Tracksuits
 Sweatpants
-
-## Apparel - Women's Specific
 Sports bras
 Yoga pants
 Athletic dresses
 Skirts
-
-## Apparel - Outerwear
 Windbreaker
 Puffer jackets
 Rain jackets
 Vests
-
-## Apparel - Specialty
 swimwear
 Nike Pro
 Livestrong
 ACG (All Conditions Gear)
 NikeLab
 ISPA
-
-## Accessories & Equipment
 bags
 Backpacks
 Duffel bags
@@ -176,8 +149,6 @@ knee pads
 shin guards
 Ankle braces
 Compression sleeves
-
-## Technologies & Features
 Flyknit
 Flywire
 ZoomX
