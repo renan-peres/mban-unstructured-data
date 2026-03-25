@@ -37,7 +37,6 @@ Air Max 270
 Air Max 2090
 VaporMax
 Air Force 1
-Dunk
 Air Jordan
 Blazer
 Cortez
@@ -159,7 +158,6 @@ Lunarlon
 Cushlon
 VaporMax
 Shox
-Free
 FlyEase
 Adapt (Auto-lacing)
 NBA Connected Jerseys
