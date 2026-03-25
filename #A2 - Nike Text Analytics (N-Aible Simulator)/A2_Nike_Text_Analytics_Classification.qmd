@@ -750,8 +750,12 @@ categorized_summary <- sentiment_scored %>%
   ) %>%
   filter(doc_count >= 3)
 
-ggplot(categorized_summary, aes(x = category, y = avg_sentiment)) +
-  geom_col(fill = price_focus_color, alpha = 0.85) +
+ggplot(categorized_summary, aes(x = category, y = avg_sentiment, fill = category)) +
+  geom_col(alpha = 0.85, show.legend = FALSE) +
+  scale_fill_manual(values = c(
+    "Footwear" = price_focus_color,
+    "Apparel" = unname(vocab_palette["Sustainability"])
+  )) +
   labs(
     title = "Pricing Sentiment: Footwear vs. Apparel",
     subtitle = "Only Nike comments with explicit price mentions are included",
