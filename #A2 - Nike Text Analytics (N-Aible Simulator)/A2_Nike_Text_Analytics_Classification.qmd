@@ -28,9 +28,6 @@ format:
 ---
 
 ```{r setup, include=FALSE}
-# ─────────────────────────────────────────────────────────────────────────────
-# SETUP: Auto-install missing packages, load all libraries, set global options
-# ─────────────────────────────────────────────────────────────────────────────
 required_pkgs <- unique(c(
   # Core tidyverse & data wrangling
   "tidyverse", "lubridate", "stringr", "janitor", "scales", "knitr", "kableExtra",
@@ -99,19 +96,28 @@ theme_set(theme_nike)
 # Centralized palettes used across the notebook
 nike_accent <- "#F46B2F"
 brand_colors <- c("Nike" = nike_accent, "Adidas" = "#1D1D1B", "Under Armour" = "#003DA5")
-source_colors <- c("reddit" = "#4E79A7", "youtube" = "#E15759", "unknown" = "#76B7B2")
+source_levels <- c("Reddit", "YouTube", "Unknown")
+source_colors <- c("Reddit" = "#4E79A7", "YouTube" = "#E15759", "Unknown" = "#76B7B2")
 lexicon_colors <- c("AFINN" = nike_accent, "Bing" = "#4E79A7", "NRC" = "#59A14F")
 vocab_palette <- c("Sustainability" = "#2E8B57", "Greenwashing" = "#B22222")
 price_focus_color <- nike_accent
 topic_palette <- c("1" = "#F28E2B", "2" = "#4E79A7", "3" = "#59A14F",
                    "4" = "#E15759", "5" = "#76B7B2", "6" = "#EDC948")
 
+normalize_source <- function(source) {
+  case_when(
+    str_detect(str_to_lower(coalesce(source, "unknown")), "reddit") ~ "Reddit",
+    str_detect(str_to_lower(coalesce(source, "unknown")), "youtube") ~ "YouTube",
+    TRUE ~ "Unknown"
+  )
+}
+
 scale_fill_brand <- function(...) {
   scale_fill_manual(values = brand_colors, ...)
 }
 
 scale_fill_source <- function(...) {
-  scale_fill_manual(values = source_colors, ...)
+  scale_fill_manual(values = source_colors, breaks = source_levels, drop = FALSE, ...)
 }
 
 scale_fill_lexicon <- function(...) {
@@ -152,6 +158,23 @@ if (!interactive()) {
   invisible(ensure_textdata_lexicon("nrc", "NRCWordEmotion.rds"))
   invisible(ensure_textdata_lexicon("bing", "bing.rds"))
 }
+
+load_afinn_lexicon <- function() {
+  afinn_url <- "https://raw.githubusercontent.com/fnielsen/afinn/master/afinn/data/AFINN-111.txt"
+
+  tryCatch(
+    readr::read_tsv(
+      afinn_url,
+      col_names = c("word", "value"),
+      show_col_types = FALSE,
+      progress = FALSE
+    ),
+    error = function(e) {
+      message("AFINN lexicon unavailable: ", e$message)
+      tibble(word = character(), value = numeric())
+    }
+  )
+}
 ```
 
 ## How to Read This Notebook
@@ -179,7 +202,7 @@ Nike's leadership has observed: (1) increasing online conversation around sustai
 Our analysis is scoped to the following **four business questions**:
 
 | \# | Pillar | Question |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | 1 | Brand Perception | What is the overall sentiment toward Nike across online conversations? |
 | 2 | Product Strategy | Which Nike product lines are most associated with negative traits (e.g., sizing, durability, comfort)? |
 | 3 | Sustainability | Is Nike's sustainability messaging resonating, or is greenwashing language appearing? |
@@ -209,7 +232,7 @@ Data collection is handled by a separate R script (`00_data_collection.R`) that 
 **Step 1 (run once):** Execute `source("00_data_collection.R")` in your R console. This produces:
 
 | File | Source | API / Package | Contents |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | `data/reddit_comments.csv` | Reddit (r/Sneakers, r/Nike, r/RunningShoeGeeks) | `RedditExtractoR` | Comments for Nike, Adidas, Under Armour |
 | `data/youtube_comments.csv` | YouTube sneaker reviews | `httr` + YouTube Data API v3 | Comments from Nike/Adidas/UA review videos |
 
@@ -226,12 +249,6 @@ The CSVs produced by `00_data_collection.R` are loaded below. Each file contains
 This section performs three steps in sequence: load each source, combine into a standardized master table, and validate composition by brand/source.
 
 ```{r load-csv-data}
-# ─────────────────────────────────────────────────────────────────────────────
-# Load pre-collected Reddit and YouTube data from CSV files
-# ─────────────────────────────────────────────────────────────────────────────
-# data_dir <- "data"
-# reddit_path  <- file.path(data_dir, "reddit_comments.csv")
-# youtube_path <- file.path(data_dir, "youtube_comments.csv")
 
 # GitHub raw URLs (data files + external term lists)
 github_data_base_url <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data"
@@ -240,7 +257,7 @@ youtube_url                 <- paste0(github_data_base_url, "/youtube_comments.c
 github_custom_stopwords_url <- paste0(github_data_base_url, "/custom_stopwords.txt")
 github_sustainability_url   <- paste0(github_data_base_url, "/sustainability_terms.txt")
 github_greenwashing_url     <- paste0(github_data_base_url, "/greenwashing_terms.txt")
-github_product_segments     <- paste0(github_data_base_url, "/nike_product_segments.txt")
+github_product_lines        <- paste0(github_data_base_url, "/nike_product_segments.txt")
 
 # Read and normalize external terms from GitHub text files
 read_terms_from_github <- function(url, label, stem = FALSE) {
@@ -307,9 +324,6 @@ if (length(source_frames) == 0) {
   stop("No data loaded. URLs may be invalid or files don't exist on GitHub.")
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Check for sustainability and greenwashing language presence
-# ─────────────────────────────────────────────────────────────────────────────
 sustainability_terms <- read_terms_from_github(
   url = github_sustainability_url,
   label = "sustainability terms",
@@ -321,9 +335,9 @@ greenwash_terms <- read_terms_from_github(
   stem = TRUE
 )
 
-nike_product_segments <- read_terms_from_github(
-  url = github_product_segments,
-  label = "product segments",
+nike_product_lines <- read_terms_from_github(
+  url = github_product_lines,
+  label = "product lines",
   stem = TRUE
 )
 
@@ -331,14 +345,11 @@ cat(sprintf("\n✓ Loaded %d sources total\n", length(source_frames)))
 ```
 
 ```{r build-master-dataset}
-# ─────────────────────────────────────────────────────────────────────────────
-# Combine Reddit + YouTube into one unified master dataset
-# ─────────────────────────────────────────────────────────────────────────────
 raw_text <- bind_rows(source_frames) %>%
   select(any_of(c("text", "rating", "source", "brand", "doc_id"))) %>%
   mutate(
     doc_id = row_number(),
-    source = str_to_lower(coalesce(source, "unknown")),
+    source = factor(normalize_source(source), levels = source_levels),
     brand  = case_when(
       str_detect(str_to_lower(coalesce(brand, "")), "nike")              ~ "Nike",
       str_detect(str_to_lower(coalesce(brand, "")), "adidas")            ~ "Adidas",
@@ -380,10 +391,6 @@ cat(sprintf(
 ```
 
 ```{r analysis-primitives}
-# ─────────────────────────────────────────────────────────────────────────────
-# Build shared analysis objects once so downstream sections can reuse them
-# regardless of narrative order in the report.
-# ─────────────────────────────────────────────────────────────────────────────
 tokens <- raw_text %>%
   select(doc_id, source, brand, product_line, rating, date, text) %>%
   unnest_tokens(word, text) %>%
@@ -419,10 +426,174 @@ cat(sprintf(
 ))
 ```
 
+```{r shared-derived-objects}
+nike_text <- raw_text %>%
+  filter(brand == "Nike")
+
+if (nrow(nike_text) == 0) {
+  stop("No Nike documents found after data loading and brand normalization.")
+}
+
+nike_tokens <- tokens %>%
+  filter(brand == "Nike")
+
+price_terms <- c(
+  "expensive", "pricey", "overpriced", "ripoff", "scam", "markup", "costly",
+  "retail", "standard", "msrp", "normal", "base", "average", "regular",
+  "cheap", "affordable", "deal", "steal", "discount", "sale", "budget"
+)
+
+price_doc_flags <- tokens %>%
+  group_by(doc_id, brand) %>%
+  summarise(has_price_mention = any(stem %in% price_terms), .groups = "drop")
+
+nike_doc_product_lines <- nike_tokens %>%
+  filter(stem %in% nike_product_lines) %>%
+  select(doc_id, product_line = word) %>%
+  distinct()
+
+nike_term_frequency <- nike_tokens %>%
+  count(stem, sort = TRUE)
+
+category_map <- c(
+  "shoe" = "Footwear", "sneaker" = "Footwear", "run" = "Footwear",
+  "jordan" = "Footwear", "dunk" = "Footwear", "max" = "Footwear",
+  "shirt" = "Apparel", "hoodi" = "Apparel", "pant" = "Apparel",
+  "jacket" = "Apparel", "jersei" = "Apparel", "sock" = "Apparel"
+)
+
+nike_doc_categories <- nike_tokens %>%
+  mutate(category = category_map[stem]) %>%
+  filter(!is.na(category)) %>%
+  select(doc_id, category) %>%
+  distinct()
+
+sus_flagged <- tokens %>%
+  mutate(
+    is_sustainability = stem %in% sustainability_terms,
+    is_greenwash = stem %in% greenwash_terms
+  ) %>%
+  group_by(doc_id, brand) %>%
+  summarise(
+    has_sustainability = any(is_sustainability),
+    has_greenwash = any(is_greenwash),
+    .groups = "drop"
+  )
+
+nike_vocab_sentiment <- bind_rows(
+  nike_tokens %>%
+    filter(stem %in% sustainability_terms) %>%
+    count(word, stem, sort = TRUE) %>%
+    mutate(Vocabulary = "Sustainability"),
+  nike_tokens %>%
+    filter(stem %in% greenwash_terms) %>%
+    count(word, stem, sort = TRUE) %>%
+    mutate(Vocabulary = "Greenwashing")
+) %>%
+  left_join(bing %>% select(word, sentiment), by = c("stem" = "word")) %>%
+  mutate(sentiment = replace_na(sentiment, "Not labeled"))
+
+bigram_stop <- tibble(word = setdiff(all_stop, c("no", "not", "nor", "never")))
+
+nike_vocab_bigram <- nike_text %>%
+  select(doc_id, text) %>%
+  distinct() %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ", remove = FALSE) %>%
+  filter(!is.na(word1), !is.na(word2)) %>%
+  anti_join(bigram_stop, by = c("word1" = "word")) %>%
+  anti_join(bigram_stop, by = c("word2" = "word")) %>%
+  mutate(
+    stem1 = SnowballC::wordStem(word1, language = "en"),
+    stem2 = SnowballC::wordStem(word2, language = "en"),
+    Vocabulary = case_when(
+      stem1 %in% sustainability_terms | stem2 %in% sustainability_terms ~ "Sustainability",
+      stem1 %in% greenwash_terms | stem2 %in% greenwash_terms ~ "Greenwashing",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(Vocabulary)) %>%
+  count(Vocabulary, bigram, sort = TRUE)
+
+product_terms <- c(
+  "size", "fit", "small", "big", "tight", "loose",
+  "comfort", "comfortable", "uncomfortable",
+  "quality", "material", "durable", "cheap",
+  "sole", "design", "style", "color",
+  "break", "tear", "wear", "support", "cushion"
+)
+
+product_terms_stem <- unique(SnowballC::wordStem(product_terms, language = "en"))
+
+nike_product_docs <- nike_tokens %>%
+  filter(stem %in% product_terms_stem) %>%
+  distinct(doc_id)
+
+nike_product_text <- nike_text %>%
+  filter(doc_id %in% nike_product_docs$doc_id)
+
+nike_product_tokens <- nike_product_text %>%
+  select(doc_id, text) %>%
+  unnest_tokens(word, text) %>%
+  filter(str_detect(word, "^[a-z]{2,}$")) %>%
+  filter(!word %in% all_stop) %>%
+  mutate(stem = SnowballC::wordStem(word, language = "en"))
+
+nike_product_negative <- nike_product_tokens %>%
+  inner_join(bing, by = "word") %>%
+  filter(sentiment == "negative") %>%
+  count(stem, sort = TRUE)
+
+product_sentiment_by_term <- nike_product_tokens %>%
+  inner_join(bing, by = "word") %>%
+  filter(stem %in% product_terms_stem) %>%
+  group_by(stem) %>%
+  summarise(
+    score = sum(if_else(sentiment == "positive", 1L, -1L)),
+    mentions = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(score, desc(mentions))
+
+nike_low_sentiment_docs <- sentiment_scored %>%
+  filter(brand == "Nike", sentiment_score < 0) %>%
+  select(doc_id, sentiment_score)
+
+nike_complaint_bigrams <- nike_text %>%
+  select(doc_id, text) %>%
+  inner_join(nike_low_sentiment_docs %>% select(doc_id), by = "doc_id") %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ", remove = FALSE) %>%
+  filter(!is.na(word1), !is.na(word2)) %>%
+  filter(str_detect(word1, "^[a-z]{2,}$"), str_detect(word2, "^[a-z]{2,}$")) %>%
+  anti_join(bigram_stop, by = c("word1" = "word")) %>%
+  anti_join(bigram_stop, by = c("word2" = "word")) %>%
+  filter(str_detect(bigram, "break|cheap|hurt|tear|tight|small|uncomfort|wear")) %>%
+  count(bigram, sort = TRUE)
+
+nike_pos_neg_words <- nike_tokens %>%
+  inner_join(
+    sentiment_scored %>%
+      filter(brand == "Nike") %>%
+      select(doc_id, sentiment_score),
+    by = "doc_id"
+  ) %>%
+  mutate(group = if_else(sentiment_score > 0, "Positive", "Negative")) %>%
+  count(group, stem) %>%
+  group_by(group) %>%
+  slice_max(n, n = 10, with_ties = FALSE) %>%
+  ungroup()
+
+cat(sprintf(
+  "Shared Nike objects ready: %s Nike docs, %s Nike tokens, %s sustainability bigrams, and %s complaint-focused docs.\n",
+  format(nrow(nike_text), big.mark = ","),
+  format(nrow(nike_tokens), big.mark = ","),
+  format(nrow(nike_vocab_bigram), big.mark = ","),
+  format(nrow(nike_product_docs), big.mark = ",")
+))
+```
+
 ```{r data-summary-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary table of data composition
-# ─────────────────────────────────────────────────────────────────────────────
 raw_text %>%
   group_by(Brand = brand, Source = source) %>%
   summarise(
@@ -436,9 +607,6 @@ raw_text %>%
 ```
 
 ```{r brand-volume-plot, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Visual: Document count by brand and source
-# ─────────────────────────────────────────────────────────────────────────────
 raw_text %>%
   count(brand, source) %>%
   ggplot(aes(x = reorder(brand, -n), y = n, fill = source)) +
@@ -458,29 +626,6 @@ raw_text %>%
 To align with the core Nike use case in this codebase, we first run a focused Nike-only baseline before the cross-brand comparisons.
 
 ```{r nike-only-baseline}
-# ─────────────────────────────────────────────────────────────────────────────
-# Nike-only baseline view before cross-brand comparisons
-# ─────────────────────────────────────────────────────────────────────────────
-nike_text <- raw_text %>%
-  filter(brand == "Nike")
-
-if (nrow(nike_text) == 0) {
-  stop("No Nike documents found after data loading and brand normalization.")
-}
-
-nike_all_stop <- all_stop
-
-nike_tokens <- nike_text %>%
-  select(doc_id, source, rating, text) %>%
-  unnest_tokens(word, text) %>%
-  filter(str_detect(word, "^[a-z]{2,}$")) %>%
-  filter(!word %in% nike_all_stop) %>%
-  mutate(
-    word = if_else(word == "nmds", "nmd", word),
-    stem = SnowballC::wordStem(word, language = "en"),
-    stem = if_else(stem == "nmds", "nmd", stem)
-  )
-
 cat(sprintf(
   "Nike-only baseline: %s documents and %s cleaned tokens.\n",
   format(nrow(nike_text), big.mark = ","),
@@ -489,9 +634,6 @@ cat(sprintf(
 ```
 
 ```{r nike-only-summary-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# Nike-only source summary
-# ─────────────────────────────────────────────────────────────────────────────
 nike_text %>%
   group_by(Source = source) %>%
   summarise(
@@ -510,11 +652,7 @@ nike_text %>%
 The first diagnostic highlights dominant term stems in Nike-only documents to identify core conversation themes.
 
 ```{r nike-only-top-terms, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Top terms for Nike-only baseline
-# ─────────────────────────────────────────────────────────────────────────────
-nike_tokens %>%
-  count(stem, sort = TRUE) %>%
+nike_term_frequency %>%
   slice_head(n = 15) %>%
   ggplot(aes(x = reorder(stem, n), y = n)) +
   geom_col(fill = nike_accent, alpha = 0.85) +
@@ -526,14 +664,54 @@ nike_tokens %>%
   )
 ```
 
-## 4.2 Lexicon Sentiment Snapshot
+```{r nike-only-least-terms, fig.height=5}
+nike_term_frequency %>%
+  filter(n >= 5) %>%
+  arrange(n, stem) %>%
+  slice_head(n = 20) %>%
+  ggplot(aes(x = reorder(stem, -n), y = n)) +
+  geom_col(fill = "#fb1e1e", alpha = 0.85) +
+  coord_flip() +
+  labs(
+    title = "Nike-Only Baseline: Least Frequent Recurring Terms",
+    subtitle = "Rare terms with 5 or more mentions to highlight low-frequency noise",
+    x = "Stem",
+    y = "Frequency"
+  )
+```
+
+## 4.2 Bigrams (N-grams)
+
+Bigrams provide phrase-level context, revealing common word pairings that may indicate specific product mentions, sentiment drivers, or sustainability language.
+
+```{r nike-only-bigram, fig.height=5}
+nike_bigrams <- nike_text %>%
+  select(doc_id, text) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  separate(bigram, into = c("w1", "w2"), sep = " ") %>%
+  filter(!w1 %in% all_stop, !w2 %in% all_stop) %>%
+  filter(str_detect(w1, "^[a-z]{2,}$"), str_detect(w2, "^[a-z]{2,}$")) %>%
+  unite("bigram", w1, w2, sep = " ")
+
+nike_bigrams %>%
+  count(bigram, sort = TRUE) %>%
+  slice_head(n = 15) %>%
+  ggplot(aes(x = reorder(bigram, n), y = n)) +
+  geom_col(fill = nike_accent, alpha = 0.85) +
+  coord_flip() +
+  labs(
+    title = "Nike-Only Baseline: Top 15 Bigrams",
+    subtitle = "Common phrase pairings in Nike conversations",
+    x = "Bigram",
+    y = "Frequency"
+  )
+```
+
+## 4.3 Lexicon Sentiment Snapshot
 
 We then compare sentiment lexicons to ensure directional consistency before scaling to cross-brand sentiment diagnostics.
 
 ```{r nike-only-nrc, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Nike-only emotion profile using NRC lexicon
-# ─────────────────────────────────────────────────────────────────────────────
 nrc_nike <- tryCatch(
   tidytext::get_sentiments("nrc"),
   error = function(e) {
@@ -567,24 +745,7 @@ if (nrow(nrc_nike) == 0) {
 ```
 
 ```{r nike-lexicon-comparison, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Compare sentiment totals across AFINN, Bing, and NRC (Netflix-style chart)
-# ─────────────────────────────────────────────────────────────────────────────
-afinn_nike <- tryCatch(
-  tidytext::get_sentiments("afinn"),
-  error = function(e) {
-    afinn_url <- "https://raw.githubusercontent.com/fnielsen/afinn/master/afinn/data/AFINN-111.txt"
-    tryCatch(
-      readr::read_tsv(
-        afinn_url,
-        col_names = c("word", "value"),
-        show_col_types = FALSE,
-        progress = FALSE
-      ),
-      error = function(e2) tibble(word = character(), value = numeric())
-    )
-  }
-)
+afinn_nike <- load_afinn_lexicon()
 
 bing_nike <- tryCatch(
   tidytext::get_sentiments("bing"),
@@ -633,25 +794,11 @@ ggplot(lexicon_compare, aes(method, sentiment, fill = method)) +
   )
 ```
 
-
-## 4.3 Pricing Sentiment Analysis (H4)
+## 4.4 Pricing Sentiment Analysis (H4)
 
 This subsection tests whether price-related language is systematically associated with lower sentiment. The comparative calculations are retained for the executive summary, while the visuals focus only on documents where price is explicitly mentioned.
 
 ```{r pricing-sentiment, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Test H4: Do comments mentioning price terms have lower sentiment?
-# ─────────────────────────────────────────────────────────────────────────────
-price_terms <- c(
-  "expensive", "pricey", "overpriced", "ripoff", "scam", "markup", "costly",
-  "retail", "standard", "msrp", "normal", "base", "average", "regular",
-  "cheap", "affordable", "deal", "steal", "discount", "sale", "budget"
-)
-
-price_doc_flags <- tokens %>%
-  group_by(doc_id, brand) %>%
-  summarise(has_price_mention = any(stem %in% price_terms), .groups = "drop")
-
 price_flagged <- sentiment_scored %>%
   select(doc_id, brand, sentiment_score) %>%
   inner_join(price_doc_flags, by = c("doc_id", "brand"))
@@ -675,15 +822,10 @@ ggplot(price_mentioned_summary, aes(x = reorder(brand, avg_sentiment), y = avg_s
 ```
 
 ```{r nike-pricing-segments, fig.height=5}
-nike_doc_segments <- tokens %>%
+pricing_by_product_line <- sentiment_scored %>%
   filter(brand == "Nike") %>%
-  filter(stem %in% nike_product_segments) %>%
-  select(doc_id, segment = word) %>%
-  distinct()
-
-pricing_by_segment <- sentiment_scored %>%
-  filter(brand == "Nike") %>%
-  inner_join(nike_doc_segments, by = "doc_id") %>%
+  select(-product_line) %>%
+  inner_join(nike_doc_product_lines, by = "doc_id") %>%
   inner_join(
     price_doc_flags %>%
       filter(brand == "Nike", has_price_mention) %>%
@@ -691,8 +833,8 @@ pricing_by_segment <- sentiment_scored %>%
     by = "doc_id"
   )
 
-segment_price_summary <- pricing_by_segment %>%
-  group_by(segment) %>%
+product_line_price_summary <- pricing_by_product_line %>%
+  group_by(product_line) %>%
   summarise(
     avg_sentiment = mean(sentiment_score, na.rm = TRUE),
     doc_count = n(),
@@ -701,7 +843,7 @@ segment_price_summary <- pricing_by_segment %>%
   mutate(sentiment_band = if_else(avg_sentiment < 0, "Negative", "Non-negative")) %>%
   filter(doc_count >= 3)
 
-ggplot(segment_price_summary, aes(x = reorder(segment, avg_sentiment), y = avg_sentiment, fill = sentiment_band)) +
+ggplot(product_line_price_summary, aes(x = reorder(product_line, avg_sentiment), y = avg_sentiment, fill = sentiment_band)) +
   geom_col(alpha = 0.85, show.legend = FALSE) +
   coord_flip() +
   scale_fill_manual(values = c(
@@ -709,30 +851,15 @@ ggplot(segment_price_summary, aes(x = reorder(segment, avg_sentiment), y = avg_s
     "Non-negative" = price_focus_color
   )) +
   labs(
-    title = "Nike Pricing Sentiment by Business Segment",
+    title = "Nike Pricing Sentiment by Product Line",
     subtitle = "Only Nike comments with explicit price mentions are included",
-    x = "Product Segment",
+    x = "Product Line",
     y = "Average Sentiment Score (Bing)"
   ) +
   theme_nike
 ```
 
 ```{r nike-pricing-categories, fig.height=5}
-# Map product stems to broader business units
-category_map <- c(
-  "shoe" = "Footwear", "sneaker" = "Footwear", "run" = "Footwear",
-  "jordan" = "Footwear", "dunk" = "Footwear", "max" = "Footwear",
-  "shirt" = "Apparel", "hoodi" = "Apparel", "pant" = "Apparel",
-  "jacket" = "Apparel", "jersei" = "Apparel", "sock" = "Apparel"
-)
-
-nike_doc_categories <- tokens %>%
-  filter(brand == "Nike") %>%
-  mutate(category = category_map[stem]) %>%
-  filter(!is.na(category)) %>%
-  select(doc_id, category) %>%
-  distinct()
-
 categorized_summary <- sentiment_scored %>%
   filter(brand == "Nike") %>%
   inner_join(nike_doc_categories, by = "doc_id") %>%
@@ -759,30 +886,17 @@ ggplot(categorized_summary, aes(x = category, y = avg_sentiment, fill = category
   labs(
     title = "Pricing Sentiment: Footwear vs. Apparel",
     subtitle = "Only Nike comments with explicit price mentions are included",
-    x = "Business Unit",
+    x = "Product Category",
     y = "Average Sentiment Score"
   ) +
   theme_nike
 ```
 
-## 4.4 Sustainability Language Check (H3)
+## 4.5 Sustainability Language Check (H3)
 
 This subsection quantifies sustainability and greenwashing language prevalence, then profiles the Nike-specific vocabulary behind those signals.
 
 ```{r sustainability-summary-table}
-
-sus_flagged <- tokens %>%
-  mutate(
-    is_sustainability = stem %in% sustainability_terms,
-    is_greenwash      = stem %in% greenwash_terms
-  ) %>%
-  group_by(doc_id, brand) %>%
-  summarise(
-    has_sustainability = any(is_sustainability),
-    has_greenwash      = any(is_greenwash),
-    .groups = "drop"
-  )
-
 sus_summary <- sus_flagged %>%
   group_by(brand) %>%
   summarise(
@@ -808,19 +922,6 @@ sus_summary %>%
 ```
 
 ```{r sustainability-vocabulary-plot, fig.height=6}
-nike_vocab_sentiment <- bind_rows(
-  tokens %>%
-    filter(brand == "Nike", stem %in% sustainability_terms) %>%
-    count(word, stem, sort = TRUE) %>%
-    mutate(Vocabulary = "Sustainability"),
-  tokens %>%
-    filter(brand == "Nike", stem %in% greenwash_terms) %>%
-    count(word, stem, sort = TRUE) %>%
-    mutate(Vocabulary = "Greenwashing")
-) %>%
-  left_join(bing %>% select(word, sentiment), by = c("stem" = "word")) %>%
-  mutate(sentiment = replace_na(sentiment, "Not labeled"))
-
 nike_vocab_sentiment %>%
   group_by(Vocabulary) %>%
   slice_head(n = 10) %>%
@@ -840,65 +941,110 @@ nike_vocab_sentiment %>%
   )
 ```
 
-```{r sustainability-vocabulary-table}
-nike_vocab_sentiment %>%
+```{r sustainability-bigram-plot, fig.height=6}
+nike_vocab_bigram %>%
   group_by(Vocabulary) %>%
   slice_head(n = 10) %>%
   ungroup() %>%
-  select(
-    Category = Vocabulary,
-    Word = word,
-    Frequency = n,
-    Sentiment = sentiment
-  ) %>%
-  kable(caption = "Nike Sustainability and Greenwashing Terms with Bing Sentiment Labels") %>%
+  mutate(bigram = reorder_within(bigram, n, Vocabulary)) %>%
+  ggplot(aes(x = bigram, y = n, fill = Vocabulary)) +
+  geom_col(show.legend = FALSE, alpha = 0.9) +
+  coord_flip() +
+  scale_fill_manual(values = vocab_palette) +
+  scale_x_reordered() +
+  facet_wrap(~Vocabulary, scales = "free_y") +
+  labs(
+    title = "Nike Sustainability and Greenwashing Bigrams",
+    subtitle = "Top 10 bigrams in each vocabulary group",
+    x = NULL,
+    y = "Frequency"
+  )
+```
+
+## 4.6 Negative Comments (H2)
+
+This subsection isolates Nike comments tied to product features such as fit, comfort, quality, and durability, then surfaces the negative language, feature impact, and complaint context behind those mentions.
+
+```{r negative-comments-summary}
+product_comment_summary <- tibble(
+  Metric = c(
+    "Nike docs with product-term mentions",
+    "Negative Nike docs",
+    "Tracked product feature stems"
+  ),
+  Value = c(
+    nrow(nike_product_docs),
+    nrow(nike_low_sentiment_docs),
+    length(product_terms_stem)
+  )
+)
+
+product_comment_summary %>%
+  kable(caption = "H2: Negative Comment Analysis Scope") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r negative-driver-terms, fig.height=5}
+nike_product_negative %>%
+  slice_head(n = 15) %>%
+  ggplot(aes(x = reorder(stem, n), y = n)) +
+  geom_col(fill = "#D62728", alpha = 0.9) +
+  coord_flip() +
+  labs(
+    title = "Top Product Complaints in Nike Comments",
+    subtitle = "Negative words appearing in Nike comments that mention product features",
+    x = "Issue Stem",
+    y = "Frequency"
+  )
+```
+
+```{r negative-feature-impact, fig.height=5}
+product_sentiment_by_term %>%
+  slice_max(abs(score), n = 15, with_ties = FALSE) %>%
+  ggplot(aes(x = reorder(stem, score), y = score, fill = score > 0)) +
+  geom_col(alpha = 0.9, show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = "#4E79A7", "FALSE" = "#D62728")) +
+  labs(
+    title = "Product Feature Sentiment Impact",
+    subtitle = "Net sentiment score for key Nike product-feature terms",
+    x = "Feature Stem",
+    y = "Sentiment Score"
+  )
+```
+
+```{r negative-context-bigrams, fig.height=5}
+nike_complaint_bigrams %>%
+  slice_head(n = 15) %>%
+  ggplot(aes(x = reorder(bigram, n), y = n)) +
+  geom_col(fill = nike_accent, alpha = 0.9) +
+  coord_flip() +
+  labs(
+    title = "Complaint Context Bigrams",
+    subtitle = "Frequent two-word phrases in negative Nike documents tied to product complaints",
+    x = "Bigram",
+    y = "Frequency"
+  )
 ```
 
 ------------------------------------------------------------------------
 
 # 5. Phase 2: Cross-Brand NLP Foundation (Nike vs Adidas vs Under Armour)
+This section builds the core NLP primitives needed for cross-brand diagnostics in Phases 3-6. The same tokenization, bigram extraction, and DTM construction steps are applied to the full corpus to ensure comparability.
 
-## 5.1 Tokenization, Stopword Removal, and Stemming
-
-This section reports the reusable `tokens` object already built in the shared analysis setup above.
-
-```{r preprocessing}
-# ─────────────────────────────────────────────────────────────────────────────
-# Reuse full-corpus tokens built in the shared analysis setup
-# ─────────────────────────────────────────────────────────────────────────────
+```{r preprocessing, echo=FALSE}
 cat(sprintf(
-  "Tokenization complete: %s tokens from %s documents.\n",
+  "Tokenization: %s tokens from %s documents.\n",
   format(nrow(tokens), big.mark = ","),
   format(n_distinct(tokens$doc_id), big.mark = ",")
 ))
 ```
 
-```{r top-terms-plot, fig.height=6}
-# ─────────────────────────────────────────────────────────────────────────────
-# Top 20 stems overall
-# ─────────────────────────────────────────────────────────────────────────────
-tokens %>%
-  count(stem, sort = TRUE) %>%
-  slice_head(n = 20) %>%
-  ggplot(aes(x = reorder(stem, n), y = n)) +
-  geom_col(fill = nike_accent, alpha = 0.85) +
-  coord_flip() +
-  labs(
-    title    = "Top 20 Stemmed Terms Across All Brands",
-    subtitle = "After stopword removal and stemming",
-    x = "Stem", y = "Frequency"
-  )
-```
-
-## 5.2 Bigrams (N-grams)
+## 5.1 Bigrams (N-grams)
 
 Bigrams add phrase-level context, complementing unigram frequencies from the previous step.
 
 ```{r bigrams, fig.height=8}
-# ─────────────────────────────────────────────────────────────────────────────
-# Extract and visualize top bigrams by brand
-# ─────────────────────────────────────────────────────────────────────────────
 bigrams <- raw_text %>%
   select(doc_id, source, brand, product_line, rating, text) %>%
   unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
@@ -925,40 +1071,21 @@ bigrams %>%
   )
 ```
 
-## 5.3 Document-Term Matrix (DTM)
 
-The DTM provides the sparse matrix representation needed for topic modeling and other term-based methods.
-
-```{r dtm}
-# ─────────────────────────────────────────────────────────────────────────────
-# Construct DTM from stemmed tokens
-# ─────────────────────────────────────────────────────────────────────────────
+```{r dtm, echo=FALSE}
 dtm_input <- tokens %>% count(doc_id, stem)
 dtm <- dtm_input %>% cast_dtm(document = doc_id, term = stem, value = n)
-
-cat(sprintf(
-  "Document-Term Matrix: %d documents x %d terms (%.1f%% sparse)\n",
-  nrow(dtm), ncol(dtm),
-  100 * (1 - length(dtm$v) / (nrow(dtm) * ncol(dtm)))
-))
 ```
 
 With a standardized token and matrix foundation in place, we can now test sentiment-related hypotheses across brands.
 
-------------------------------------------------------------------------
-
-# 6. Phase 3: Cross-Brand Sentiment Diagnostics
-
 This section addresses H1, H3, and H4 by combining emotion distributions, document sentiment scores, pricing language, and sustainability/greenwashing signals.
 
-## 6.1 NRC Emotion Breakdown by Brand
+## 5.2 NRC Emotion Breakdown by Brand
 
 We start with emotional composition to understand *how* each brand is discussed, beyond simple positive/negative polarity.
 
 ```{r nrc-emotions, fig.height=7}
-# ─────────────────────────────────────────────────────────────────────────────
-# NRC lexicon: 8 emotions (excluding pos/neg aggregates) by brand
-# ─────────────────────────────────────────────────────────────────────────────
 nrc <- tryCatch(
   tidytext::get_sentiments("nrc"),
   error = function(e) {
@@ -1002,32 +1129,11 @@ if (nrow(nrc) == 0) {
 }
 ```
 
-```{r nrc-emotion-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary table of emotion proportions
-# ─────────────────────────────────────────────────────────────────────────────
-if (nrow(nrc_pct) == 0) {
-  tibble(Note = "NRC lexicon unavailable for this render") %>%
-    kable(caption = "NRC Emotion Distribution by Brand") %>%
-    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-} else {
-  nrc_pct %>%
-    select(Brand = brand, Emotion = sentiment, Count = n, `Share (%)` = pct) %>%
-    mutate(`Share (%)` = round(`Share (%)`, 1)) %>%
-    arrange(Brand, desc(Count)) %>%
-    kable(caption = "NRC Emotion Distribution by Brand") %>%
-    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-}
-```
-
-## 6.2 Bing Sentiment by Brand and Source
+## 5.3 Bing Sentiment by Brand and Source
 
 Next, we compute document-level sentiment and compare both central tendency and distribution by brand and channel.
 
 ```{r bing-sentiment}
-# ─────────────────────────────────────────────────────────────────────────────
-# Reuse Bing lexicon and document-level sentiment score built upstream
-# ─────────────────────────────────────────────────────────────────────────────
 cat(sprintf(
   "Bing sentiment scores available for %s documents.\n",
   format(nrow(sentiment_scored), big.mark = ",")
@@ -1035,9 +1141,6 @@ cat(sprintf(
 ```
 
 ```{r sentiment-brand-plot, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Average sentiment score by brand
-# ─────────────────────────────────────────────────────────────────────────────
 brand_sentiment <- sentiment_scored %>%
   group_by(brand) %>%
   summarise(
@@ -1063,25 +1166,7 @@ ggplot(brand_sentiment, aes(x = reorder(brand, avg_sentiment), y = avg_sentiment
   expand_limits(y = max(abs(brand_sentiment$avg_sentiment)) * 1.5)
 ```
 
-```{r sentiment-distribution-plot, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Sentiment score distribution (violin + boxplot) by brand
-# ─────────────────────────────────────────────────────────────────────────────
-ggplot(sentiment_scored, aes(x = brand, y = sentiment_score, fill = brand)) +
-  geom_violin(alpha = 0.3, show.legend = FALSE) +
-  geom_boxplot(width = 0.15, alpha = 0.7, show.legend = FALSE) +
-  scale_fill_brand() +
-  labs(
-    title    = "Sentiment Score Distribution by Brand",
-    subtitle = "Violin + box plot showing spread and outliers",
-    x = NULL, y = "Document-Level Sentiment Score"
-  )
-```
-
 ```{r sentiment-by-source, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Sentiment breakdown by source channel
-# ─────────────────────────────────────────────────────────────────────────────
 source_sentiment <- sentiment_scored %>%
   group_by(brand, source) %>%
   summarise(avg_sentiment = mean(sentiment_score, na.rm = TRUE), docs = n(), .groups = "drop") %>%
@@ -1102,14 +1187,11 @@ if (nrow(source_sentiment) > 1 && n_distinct(source_sentiment$source) > 1) {
 
 ------------------------------------------------------------------------
 
-# 7. Phase 4: Topic Discovery (LDA)
+# 6. Phase 3: Topic Discovery (LDA)
 
 LDA reveals hidden conversation clusters that are not obvious from sentiment scores alone.
 
 ```{r lda-model, fig.height=8}
-# ─────────────────────────────────────────────────────────────────────────────
-# LDA with k=6 topics -- remove very sparse terms first
-# ─────────────────────────────────────────────────────────────────────────────
 lda_k <- 6
 
 # Remove extremely sparse terms for better topic quality
@@ -1148,9 +1230,6 @@ ggplot(topic_terms, aes(x = reorder_within(term, beta, topic), y = beta, fill = 
 ```
 
 ```{r topic-brand-distribution, fig.height=5}
-# ─────────────────────────────────────────────────────────────────────────────
-# Map dominant topics back to brands
-# ─────────────────────────────────────────────────────────────────────────────
 doc_topics <- tidytext::tidy(lda_fit, matrix = "gamma") %>%
   group_by(document) %>%
   slice_max(gamma, n = 1) %>%
@@ -1175,9 +1254,6 @@ ggplot(topic_by_brand, aes(x = factor(dominant_topic), y = n, fill = brand)) +
 ```
 
 ```{r topic-summary-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary table: Top terms per topic for interpretation
-# ─────────────────────────────────────────────────────────────────────────────
 topic_terms %>%
   group_by(Topic = topic) %>%
   summarise(`Top Terms` = paste(term, collapse = ", "), .groups = "drop") %>%
@@ -1191,14 +1267,11 @@ With latent topics identified, we next isolate which terms most clearly differen
 
 ------------------------------------------------------------------------
 
-# 8. Phase 5: Brand Differentiation (TF-IDF)
+# 7. Phase 4: Brand Differentiation (TF-IDF)
 
 TF-IDF complements LDA by surfacing high-signal terms that are distinctive for each brand.
 
 ```{r tfidf-brand, fig.height=8}
-# ─────────────────────────────────────────────────────────────────────────────
-# TF-IDF: What terms uniquely characterize each brand's language?
-# ─────────────────────────────────────────────────────────────────────────────
 tfidf_brand <- tokens %>%
   count(brand, stem) %>%
   bind_tf_idf(term = stem, document = brand, n = n) %>%
@@ -1220,9 +1293,6 @@ ggplot(tfidf_brand, aes(x = reorder_within(stem, tf_idf, brand), y = tf_idf, fil
 ```
 
 ```{r tfidf-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# TF-IDF top terms table
-# ─────────────────────────────────────────────────────────────────────────────
 tfidf_brand %>%
   group_by(Brand = brand) %>%
   slice_max(tf_idf, n = 10) %>%
@@ -1235,14 +1305,11 @@ We then move from distinctive terms to relationship structure by mapping keyword
 
 ------------------------------------------------------------------------
 
-# 9. Phase 6: Keyword Relationship Network
+# 8. Phase 5: Keyword Relationship Network
 
 This network view captures how terms cluster together in the same documents, highlighting concept ecosystems rather than isolated keywords.
 
 ```{r cooccurrence-network, fig.height=8, fig.width=10}
-# ─────────────────────────────────────────────────────────────────────────────
-# Pairwise correlation network using widyr
-# ─────────────────────────────────────────────────────────────────────────────
 # Keep one record per document-term pair, then remove very rare terms
 pairwise_terms <- tokens %>%
   select(doc_id, stem) %>%
@@ -1287,9 +1354,6 @@ if (nrow(top_pairs) > 2) {
 ```
 
 ```{r cooccurrence-table}
-# ─────────────────────────────────────────────────────────────────────────────
-# Top 20 pairwise term correlations
-# ─────────────────────────────────────────────────────────────────────────────
 pair_counts %>%
   slice_head(n = 20) %>%
   mutate(correlation = round(correlation, 3)) %>%
@@ -1302,16 +1366,13 @@ The final step consolidates all diagnostics into executive findings and action-o
 
 ------------------------------------------------------------------------
 
-# 10. Executive Synthesis and Recommendations
+# 9. Executive Synthesis and Recommendations
 
 ## Summary of Key Findings
 
 The summary table below is generated directly from computed objects in prior sections to preserve traceability from code to recommendations.
 
 ```{r findings-summary}
-# ─────────────────────────────────────────────────────────────────────────────
-# Auto-generate a findings summary from computed objects
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Helper to safely pull brand sentiment
 get_brand_sent <- function(b) {
@@ -1385,12 +1446,12 @@ The recommendations are grouped by the same decision pillars introduced in Secti
 
 ------------------------------------------------------------------------
 
-# 11. Governance: Limitations, Risk Controls, and Ethics
+# 10. Governance: Limitations, Risk Controls, and Ethics
 
 Before finalizing decisions, we document known analytical constraints and controls to support responsible interpretation.
 
 | \# | Limitation | Impact | Mitigation |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | 1 | **Sampling Bias** | Reddit skews younger/male/US; YouTube skews toward engaged sneaker enthusiasts. Neither represents all Nike customers. | Triangulate across both sources. Note demographic skew in all recommendations. |
 | 2 | **Fake/Manipulated Content** | Coordinated upvote manipulation or astroturfing can distort Reddit sentiment. Lexicon methods cannot reliably detect this. | Flag suspiciously short or repetitive comments. Note this limitation for client. |
 | 3 | **Lexicon Bias** | Dictionary-based sentiment (NRC/Bing) cannot detect sarcasm, negation (e.g., "not great"), or domain-specific slang common on Reddit. | Supplement with classification model and manual spot-checks. Consider contextual models for production. |
