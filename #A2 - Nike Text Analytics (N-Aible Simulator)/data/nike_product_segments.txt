@@ -4,7 +4,6 @@ Alphafly
 Zoom Fly
 Vomero
 Invincible
-Free RN
 React Infinity Run
 ZoomX Streakfly
 Tempo Next
@@ -53,7 +52,6 @@ Killshot
 Metcon
 SuperRep
 Flex
-Free Metcon
 Air Zoom SuperRep
 React Metcon
 Romaleos
