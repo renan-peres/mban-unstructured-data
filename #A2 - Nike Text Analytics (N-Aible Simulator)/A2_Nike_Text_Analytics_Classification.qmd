@@ -291,7 +291,7 @@ Both sources satisfy the requirement of collecting text from **at least two chan
 
 We load the CSVs, combine them into one master table with standardized `brand` and `source` columns, and validate composition.
 
-```{r load-csv-data}
+```{r load-csv-data, echo=FALSE}
 # ── GitHub raw URLs ───────────────────────────────────────────
 gh_base <- "https://raw.githubusercontent.com/renan-peres/mban-unstructured-data/refs/heads/main/%23A2%20-%20Nike%20Text%20Analytics%20(N-Aible%20Simulator)/data"
 
@@ -314,14 +314,12 @@ load_csv_safe <- function(url, label) {
 
 source_frames <- list()
 
-cat("Loading Reddit data...\n")
 reddit_df <- load_csv_safe(urls$reddit, "Reddit")
 if (!is.null(reddit_df)) {
   source_frames[["reddit"]] <- reddit_df
   cat(sprintf("✓ Reddit: %s rows\n", format(nrow(reddit_df), big.mark = ",")))
 }
 
-cat("Loading YouTube data...\n")
 youtube_df <- load_csv_safe(urls$youtube, "YouTube")
 if (!is.null(youtube_df)) {
   source_frames[["youtube"]] <- youtube_df
@@ -335,11 +333,9 @@ sustainability_terms  <- read_terms(urls$sustain, "sustainability terms", stem =
 greenwash_terms       <- read_terms(urls$greenwash, "greenwashing terms", stem = TRUE)
 nike_product_lines    <- read_terms(urls$product_lines, "product lines", stem = TRUE)
 nike_product_segments_raw <- read_terms(urls$product_lines, "product lines", stem = FALSE)
-
-cat(sprintf("\n✓ Loaded %d sources total\n", length(source_frames)))
 ```
 
-```{r build-master-dataset}
+```{r build-master-dataset, echo=FALSE}
 raw_text <- bind_rows(source_frames) %>%
   select(any_of(c("text", "rating", "source", "brand", "doc_id"))) %>%
   mutate(
@@ -368,11 +364,9 @@ cat(sprintf(
 # ── Build shared stopword set (once) ──────────────────────────
 custom_stop <- read_terms(urls$stopwords, "custom stopwords", stem = FALSE)
 all_stop    <- unique(c(tidytext::stop_words$word, stopwords::stopwords("en"), custom_stop))
-
-cat(sprintf("Loaded %s custom stopwords.\n", format(length(custom_stop), big.mark = ",")))
 ```
 
-```{r analysis-primitives}
+```{r analysis-primitives, echo=FALSE}
 # ── Shared tokenization (used across all sections) ────────────
 tokens <- tokenize_text(raw_text, all_stop)
 
@@ -387,13 +381,13 @@ sentiment_scored <- tokens %>%
   summarise(sentiment_score = sum(score), .groups = "drop")
 
 cat(sprintf(
-  "Shared analysis objects ready: %s tokens and %s sentiment-scored documents.\n",
+  "Shared objects: %s tokens and %s sentiment-scored documents.\n",
   format(nrow(tokens), big.mark = ","),
   format(nrow(sentiment_scored), big.mark = ",")
 ))
 ```
 
-```{r shared-derived-objects}
+```{r shared-derived-objects, echo=FALSE}
 # ── Nike subsets ──────────────────────────────────────────────
 nike_text   <- raw_text %>% filter(brand == "Nike")
 if (nrow(nike_text) == 0) stop("No Nike documents found after brand normalization.")
@@ -559,8 +553,6 @@ cat(sprintf(
 ))
 ```
 
-The table below shows the document breakdown by brand and source after filtering out very short texts (<10 characters).
-
 ```{r data-summary-table}
 raw_text %>%
   group_by(Brand = brand, Source = source) %>%
@@ -589,7 +581,7 @@ Nike dominates the corpus because the search queries were designed around Nike a
 
 Before comparing across brands, we run a focused Nike-only pass to understand the single-brand landscape: term frequencies, bigrams, emotion profile, topics, and keyword relationships.
 
-```{r nike-baseline-summary}
+```{r nike-baseline-summary, echo=FALSE}
 cat(sprintf(
   "Nike-only baseline: %s documents and %s cleaned tokens.\n",
   format(nrow(nike_text), big.mark = ","),
@@ -597,7 +589,7 @@ cat(sprintf(
 ))
 ```
 
-```{r nike-summary-table}
+```{r nike-summary-table, echo=FALSE}
 nike_text %>%
   group_by(Source = source) %>%
   summarise(Documents = n(),
@@ -1063,7 +1055,7 @@ ggplot(topic_by_source, aes(x = topic_theme, y = n, fill = source)) +
        x = "Topic Segment", y = "Proportion", fill = "Source")
 ```
 
-```{r topic-summary-table}
+```{r topic-summary-table, echo=FALSE}
 topic_terms %>%
   group_by(`Topic Segment` = topic_theme) %>%
   summarise(`Top Terms` = paste(term, collapse = ", "), .groups = "drop") %>%
