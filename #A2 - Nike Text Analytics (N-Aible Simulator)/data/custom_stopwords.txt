@@ -20,7 +20,6 @@ format
 gif
 auto
 blog
-zoom
 jpeg width
 format pjpg
 preview redd
