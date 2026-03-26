@@ -621,7 +621,7 @@ raw_text %>%
 
 ------------------------------------------------------------------------
 
-# 4. Phase 1: Nike Baseline
+# 4. Nike Baseline Analysis
 
 To align with the core Nike use case in this codebase, we first run a focused Nike-only baseline before the cross-brand comparisons.
 
@@ -794,7 +794,141 @@ ggplot(lexicon_compare, aes(method, sentiment, fill = method)) +
   )
 ```
 
-## 4.4 Pricing Sentiment Analysis (H4)
+## 4.4 Topic Discovery (LDA)
+
+This Nike-only LDA model reveals hidden conversation clusters within Nike comments that are not obvious from sentiment scores alone.
+
+```{r lda-model, fig.height=8}
+lda_k <- 6
+
+nike_dtm_input <- nike_tokens %>%
+  count(doc_id, stem)
+
+nike_dtm <- nike_dtm_input %>%
+  cast_dtm(document = doc_id, term = stem, value = n)
+
+# Remove extremely sparse terms for better topic quality
+dtm_trimmed <- tm::removeSparseTerms(nike_dtm, sparse = 0.995)
+
+# Safety check
+if (nrow(dtm_trimmed) < lda_k || ncol(dtm_trimmed) < lda_k) {
+  cat("Insufficient Nike terms/docs for LDA after trimming. Using full Nike DTM.\n")
+  dtm_trimmed <- nike_dtm
+}
+
+# Remove empty documents
+row_totals <- slam::row_sums(dtm_trimmed)
+dtm_trimmed <- dtm_trimmed[row_totals > 0, ]
+
+lda_fit <- topicmodels::LDA(dtm_trimmed, k = lda_k, control = list(seed = 42))
+
+topic_terms <- tidytext::tidy(lda_fit, matrix = "beta") %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup()
+
+ggplot(topic_terms, aes(x = reorder_within(term, beta, topic), y = beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  scale_fill_topic() +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~topic, scales = "free_y", ncol = 2,
+             labeller = labeller(topic = function(x) paste("Topic", x))) +
+  labs(
+    title    = "Nike Topic Discovery: Top 10 Terms per Topic",
+    subtitle = sprintf("k = %d topics fitted on %s Nike documents",
+                       lda_k, format(nrow(dtm_trimmed), big.mark = ",")),
+    x = "Term", y = "Beta (term probability)"
+  )
+```
+
+```{r topic-brand-distribution, fig.height=5}
+doc_topics <- tidytext::tidy(lda_fit, matrix = "gamma") %>%
+  group_by(document) %>%
+  slice_max(gamma, n = 1) %>%
+  ungroup() %>%
+  rename(doc_id = document, dominant_topic = topic, topic_prob = gamma) %>%
+  mutate(doc_id = as.integer(doc_id))
+
+topic_by_source <- nike_text %>%
+  select(doc_id, source) %>%
+  inner_join(doc_topics, by = "doc_id") %>%
+  count(source, dominant_topic)
+
+ggplot(topic_by_source, aes(x = factor(dominant_topic), y = n, fill = source)) +
+  geom_col(position = "fill", alpha = 0.85) +
+  scale_fill_source() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title    = "Nike Topic Distribution by Source",
+    subtitle = "How Nike topics differ between Reddit and YouTube comments",
+    x = "Dominant Topic", y = "Proportion of Nike Documents", fill = "Source"
+  )
+```
+
+```{r topic-summary-table}
+topic_terms %>%
+  group_by(Topic = topic) %>%
+  summarise(`Top Terms` = paste(term, collapse = ", "), .groups = "drop") %>%
+  kable(caption = "Nike LDA Topics -- Top 10 Terms for Labeling") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+> **Interpretation guidance:** Label each topic based on the terms. For example, if Topic 1 contains "run, mile, track, pace" it maps to "Running Performance." Map topics to strategic questions (product quality, pricing complaints, sustainability, etc.).
+
+With latent Nike topics identified, we next isolate which terms most clearly differentiate each brand's language.
+
+## 4.5 Keyword Relationship Network
+
+This Nike-only network view captures how terms cluster together in the same Nike documents, highlighting concept ecosystems rather than isolated keywords.
+
+```{r cooccurrence-network, fig.height=8, fig.width=10}
+# Keep one record per document-term pair, then remove very rare terms
+pairwise_terms <- nike_tokens %>%
+  select(doc_id, stem) %>%
+  distinct() %>%
+  add_count(stem, name = "doc_freq") %>%
+  filter(doc_freq >= 5)
+
+pair_counts <- pairwise_terms %>%
+  pairwise_cor(stem, doc_id, sort = TRUE, upper = FALSE)
+
+# Plot only the strongest correlations to avoid the hairball effect
+top_pairs <- pair_counts %>%
+  filter(correlation >= 0.20) %>%
+  slice_head(n = 80)
+
+if (nrow(top_pairs) > 2) {
+  graph <- top_pairs %>%
+    graph_from_data_frame(directed = FALSE)
+
+  # Compute centrality for node sizing
+  V(graph)$centrality <- degree(graph)
+
+  ggraph(graph, layout = "fr") +
+    geom_edge_link(aes(edge_alpha = correlation, edge_width = correlation), color = "gray55") +
+    geom_node_point(aes(size = centrality), color = nike_accent, alpha = 0.8) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 3.3, max.overlaps = 40) +
+    scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
+    scale_edge_width(range = c(0.2, 1.8), guide = "none") +
+    scale_size_continuous(range = c(2.5, 7), guide = "none") +
+    labs(
+      title    = "Nike Keyword Co-Occurrence Network",
+      subtitle = "Nodes = stemmed terms; edges = strongest pairwise correlations across Nike documents"
+    ) +
+    theme_void() +
+    theme(
+      plot.title    = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(color = "grey40", size = 11)
+    )
+} else {
+  cat("Not enough strongly correlated Nike term pairs to build a meaningful network.\n")
+}
+```
+
+The final step consolidates all diagnostics into executive findings and action-oriented recommendations.
+
+## 4.6 Pricing Sentiment Analysis (H4)
 
 This subsection tests whether price-related language is systematically associated with lower sentiment. The comparative calculations are retained for the executive summary, while the visuals focus only on documents where price is explicitly mentioned.
 
@@ -892,7 +1026,7 @@ ggplot(categorized_summary, aes(x = category, y = avg_sentiment, fill = category
   theme_nike
 ```
 
-## 4.5 Sustainability Language Check (H3)
+## 4.7 Sustainability Language Check (H3)
 
 This subsection quantifies sustainability and greenwashing language prevalence, then profiles the Nike-specific vocabulary behind those signals.
 
@@ -944,7 +1078,7 @@ nike_vocab_sentiment %>%
 ```{r sustainability-bigram-plot, fig.height=6}
 nike_vocab_bigram %>%
   group_by(Vocabulary) %>%
-  slice_head(n = 10) %>%
+  slice_head(n = 15) %>%
   ungroup() %>%
   mutate(bigram = reorder_within(bigram, n, Vocabulary)) %>%
   ggplot(aes(x = bigram, y = n, fill = Vocabulary)) +
@@ -961,28 +1095,9 @@ nike_vocab_bigram %>%
   )
 ```
 
-## 4.6 Negative Comments (H2)
+## 4.8 Negative Comments (H2)
 
 This subsection isolates Nike comments tied to product features such as fit, comfort, quality, and durability, then surfaces the negative language, feature impact, and complaint context behind those mentions.
-
-```{r negative-comments-summary}
-product_comment_summary <- tibble(
-  Metric = c(
-    "Nike docs with product-term mentions",
-    "Negative Nike docs",
-    "Tracked product feature stems"
-  ),
-  Value = c(
-    nrow(nike_product_docs),
-    nrow(nike_low_sentiment_docs),
-    length(product_terms_stem)
-  )
-)
-
-product_comment_summary %>%
-  kable(caption = "H2: Negative Comment Analysis Scope") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
 
 ```{r negative-driver-terms, fig.height=5}
 nike_product_negative %>%
@@ -1029,7 +1144,7 @@ nike_complaint_bigrams %>%
 
 ------------------------------------------------------------------------
 
-# 5. Phase 2: Cross-Brand NLP Foundation (Nike vs Adidas vs Under Armour)
+# 5. Cross-Brand NLP Foundation (Nike vs Adidas vs Under Armour)
 This section builds the core NLP primitives needed for cross-brand diagnostics in Phases 3-6. The same tokenization, bigram extraction, and DTM construction steps are applied to the full corpus to ensure comparability.
 
 ```{r preprocessing, echo=FALSE}
@@ -1187,87 +1302,7 @@ if (nrow(source_sentiment) > 1 && n_distinct(source_sentiment$source) > 1) {
 
 ------------------------------------------------------------------------
 
-# 6. Phase 3: Topic Discovery (LDA)
-
-LDA reveals hidden conversation clusters that are not obvious from sentiment scores alone.
-
-```{r lda-model, fig.height=8}
-lda_k <- 6
-
-# Remove extremely sparse terms for better topic quality
-dtm_trimmed <- tm::removeSparseTerms(dtm, sparse = 0.995)
-
-# Safety check
-if (nrow(dtm_trimmed) < lda_k || ncol(dtm_trimmed) < lda_k) {
-  cat("Insufficient terms/docs for LDA after trimming. Using full DTM.\n")
-  dtm_trimmed <- dtm
-}
-
-# Remove empty documents
-row_totals <- slam::row_sums(dtm_trimmed)
-dtm_trimmed <- dtm_trimmed[row_totals > 0, ]
-
-lda_fit <- topicmodels::LDA(dtm_trimmed, k = lda_k, control = list(seed = 42))
-
-topic_terms <- tidytext::tidy(lda_fit, matrix = "beta") %>%
-  group_by(topic) %>%
-  slice_max(beta, n = 10) %>%
-  ungroup()
-
-ggplot(topic_terms, aes(x = reorder_within(term, beta, topic), y = beta, fill = factor(topic))) +
-  geom_col(show.legend = FALSE, alpha = 0.85) +
-  scale_fill_topic() +
-  scale_x_reordered() +
-  coord_flip() +
-  facet_wrap(~topic, scales = "free_y", ncol = 2,
-             labeller = labeller(topic = function(x) paste("Topic", x))) +
-  labs(
-    title    = "LDA Topic Model: Top 10 Terms per Topic",
-    subtitle = sprintf("k = %d topics fitted on %s documents",
-                       lda_k, format(nrow(dtm_trimmed), big.mark = ",")),
-    x = "Term", y = "Beta (term probability)"
-  )
-```
-
-```{r topic-brand-distribution, fig.height=5}
-doc_topics <- tidytext::tidy(lda_fit, matrix = "gamma") %>%
-  group_by(document) %>%
-  slice_max(gamma, n = 1) %>%
-  ungroup() %>%
-  rename(doc_id = document, dominant_topic = topic, topic_prob = gamma) %>%
-  mutate(doc_id = as.integer(doc_id))
-
-topic_by_brand <- raw_text %>%
-  select(doc_id, brand) %>%
-  inner_join(doc_topics, by = "doc_id") %>%
-  count(brand, dominant_topic)
-
-ggplot(topic_by_brand, aes(x = factor(dominant_topic), y = n, fill = brand)) +
-  geom_col(position = "fill", alpha = 0.85) +
-  scale_fill_brand() +
-  scale_y_continuous(labels = scales::percent) +
-  labs(
-    title    = "Topic Distribution by Brand",
-    subtitle = "Which brand dominates each topic cluster?",
-    x = "Dominant Topic", y = "Proportion of Documents", fill = "Brand"
-  )
-```
-
-```{r topic-summary-table}
-topic_terms %>%
-  group_by(Topic = topic) %>%
-  summarise(`Top Terms` = paste(term, collapse = ", "), .groups = "drop") %>%
-  kable(caption = "LDA Topics -- Top 10 Terms for Labeling") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
-
-> **Interpretation guidance:** Label each topic based on the terms. For example, if Topic 1 contains "run, mile, track, pace" it maps to "Running Performance." Map topics to strategic questions (product quality, pricing complaints, sustainability, etc.).
-
-With latent topics identified, we next isolate which terms most clearly differentiate each brand's language.
-
-------------------------------------------------------------------------
-
-# 7. Phase 4: Brand Differentiation (TF-IDF)
+# 6. Brand Differentiation (TF-IDF)
 
 TF-IDF complements LDA by surfacing high-signal terms that are distinctive for each brand.
 
@@ -1305,68 +1340,7 @@ We then move from distinctive terms to relationship structure by mapping keyword
 
 ------------------------------------------------------------------------
 
-# 8. Phase 5: Keyword Relationship Network
-
-This network view captures how terms cluster together in the same documents, highlighting concept ecosystems rather than isolated keywords.
-
-```{r cooccurrence-network, fig.height=8, fig.width=10}
-# Keep one record per document-term pair, then remove very rare terms
-pairwise_terms <- tokens %>%
-  select(doc_id, stem) %>%
-  distinct() %>%
-  add_count(stem, name = "doc_freq") %>%
-  filter(doc_freq >= 5)
-
-pair_counts <- pairwise_terms %>%
-  pairwise_cor(stem, doc_id, sort = TRUE, upper = FALSE)
-
-# Plot only the strongest correlations to avoid the hairball effect
-top_pairs <- pair_counts %>%
-  filter(correlation >= 0.20) %>%
-  slice_head(n = 80)
-
-if (nrow(top_pairs) > 2) {
-  graph <- top_pairs %>%
-    graph_from_data_frame(directed = FALSE)
-
-  # Compute centrality for node sizing
-  V(graph)$centrality <- degree(graph)
-
-  ggraph(graph, layout = "fr") +
-    geom_edge_link(aes(edge_alpha = correlation, edge_width = correlation), color = "gray55") +
-    geom_node_point(aes(size = centrality), color = nike_accent, alpha = 0.8) +
-    geom_node_text(aes(label = name), repel = TRUE, size = 3.3, max.overlaps = 40) +
-    scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
-    scale_edge_width(range = c(0.2, 1.8), guide = "none") +
-    scale_size_continuous(range = c(2.5, 7), guide = "none") +
-    labs(
-      title    = "Keyword Co-Occurrence Network",
-      subtitle = "Nodes = stemmed terms; edges = strongest pairwise correlations across documents"
-    ) +
-    theme_void() +
-    theme(
-      plot.title    = element_text(face = "bold", size = 15),
-      plot.subtitle = element_text(color = "grey40", size = 11)
-    )
-} else {
-  cat("Not enough strongly correlated term pairs to build a meaningful network.\n")
-}
-```
-
-```{r cooccurrence-table}
-pair_counts %>%
-  slice_head(n = 20) %>%
-  mutate(correlation = round(correlation, 3)) %>%
-  rename(`Term 1` = item1, `Term 2` = item2, `Correlation` = correlation) %>%
-  kable(caption = "Top 20 Keyword Pairwise Correlations") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
-
-The final step consolidates all diagnostics into executive findings and action-oriented recommendations.
-
-------------------------------------------------------------------------
-
-# 9. Executive Synthesis and Recommendations
+# 7. Executive Synthesis and Recommendations
 
 ## Summary of Key Findings
 
@@ -1446,7 +1420,7 @@ The recommendations are grouped by the same decision pillars introduced in Secti
 
 ------------------------------------------------------------------------
 
-# 10. Governance: Limitations, Risk Controls, and Ethics
+# 8. Governance: Limitations, Risk Controls, and Ethics
 
 Before finalizing decisions, we document known analytical constraints and controls to support responsible interpretation.
 
@@ -1466,7 +1440,7 @@ For reproducibility, the appendix reports runtime and package/session metadata.
 
 ------------------------------------------------------------------------
 
-# 12. Appendix: Session Info
+# 9. Appendix: Session Info
 
 ```{r session-info}
 sessionInfo()
