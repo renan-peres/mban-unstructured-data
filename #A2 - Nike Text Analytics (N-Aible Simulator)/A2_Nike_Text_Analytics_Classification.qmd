@@ -142,6 +142,27 @@ read_terms <- function(url, label, stem = FALSE) {
   unique(terms)
 }
 
+#' Read Nike product segments from a two-column CSV.
+read_product_segments <- function(url) {
+  product_segments <- tryCatch(
+    readr::read_csv(url, show_col_types = FALSE),
+    error = function(e) stop(sprintf("Failed to load Nike product segments from '%s': %s", url, e$message))
+  )
+
+  required_cols <- c("category", "product")
+  missing_cols <- setdiff(required_cols, names(product_segments))
+  if (length(missing_cols)) {
+    stop(sprintf("Nike product segments CSV is missing columns: %s", paste(missing_cols, collapse = ", ")))
+  }
+
+  product_segments %>%
+    transmute(
+      category = str_squish(category),
+      product = str_squish(product)
+    ) %>%
+    filter(category != "", product != "")
+}
+
 #' Build bigrams from a text tibble, removing stopwords but preserving negation.
 build_bigrams <- function(df, stop_words_vec, min_word_len = 2) {
   negation_keep <- c("no", "not", "nor", "never")
@@ -285,7 +306,7 @@ urls <- list(
   stopwords     = paste0(gh_base, "/custom_stopwords.txt"),
   sustain       = paste0(gh_base, "/sustainability_terms.txt"),
   greenwash     = paste0(gh_base, "/greenwashing_terms.txt"),
-  product_lines = paste0(gh_base, "/nike_product_segments.txt")
+  product_lines = paste0(gh_base, "/nike_product_segments.csv")
 )
 
 # ── Load CSVs with fallback ──────────────────────────────────
@@ -313,8 +334,7 @@ if (!length(source_frames)) stop("No data loaded -- check URLs or connectivity."
 # ── Load external term lists ─────────────────────────────────
 sustainability_terms      <- read_terms(urls$sustain, "sustainability terms", stem = TRUE)
 greenwash_terms           <- read_terms(urls$greenwash, "greenwashing terms", stem = TRUE)
-nike_product_lines        <- read_terms(urls$product_lines, "product lines", stem = TRUE)
-nike_product_segments_raw <- read_terms(urls$product_lines, "product lines", stem = FALSE)
+nike_product_segments     <- read_product_segments(urls$product_lines)
 ```
 
 ```{r build-master-dataset, echo=FALSE}
@@ -383,48 +403,34 @@ price_doc_flags <- tokens %>%
   summarise(has_price_mention = any(stem %in% price_terms), .groups = "drop")
 
 # ── Nike product-line document mapping ───────────────────────
-nike_doc_product_lines <- nike_tokens %>%
-  filter(stem %in% nike_product_lines) %>%
-  select(doc_id, product_line = word) %>%
-  distinct()
+nike_product_lookup <- nike_product_segments %>%
+  mutate(product_id = row_number()) %>%
+  unnest_tokens(segment_token, product, drop = FALSE) %>%
+  filter(str_detect(segment_token, "^[a-z]{2,}$")) %>%
+  mutate(stem = SnowballC::wordStem(segment_token, language = "en")) %>%
+  distinct(product_id, category, product, stem) %>%
+  add_count(product_id, name = "product_token_count")
+
+nike_doc_product_matches <- nike_tokens %>%
+  select(doc_id, stem) %>%
+  distinct() %>%
+  inner_join(nike_product_lookup, by = "stem") %>%
+  count(doc_id, product_id, category, product, product_token_count, name = "matched_tokens") %>%
+  mutate(match_share = matched_tokens / product_token_count) %>%
+  filter(matched_tokens >= 2 | match_share >= 0.5)
+
+nike_doc_product_lines <- nike_doc_product_matches %>%
+  group_by(doc_id) %>%
+  arrange(desc(match_share), desc(matched_tokens), product) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  transmute(doc_id, product_line = product)
 
 # ── Nike term frequency (for baseline plots) ─────────────────
 nike_term_frequency <- nike_tokens %>% count(stem, sort = TRUE)
 
-# ── Nike product-segment category classifier ─────────────────
-classify_nike_segment <- function(segment_name) {
-  case_when(
-    str_detect(segment_name, regex(
-      "hoodie|sweatshirt|jacket|t-shirt|tank top|jersey|polo|shirt|pant|short|legging|tight|jogger|tracksuit|sweatpant|sports bra|yoga pant|dress|skirt|windbreaker|puffer|rain jacket|vest|swimwear|tech fleece|dri-fit|nike pro|livestrong|acg|nikelab|ispa",
-      ignore_case = TRUE)) ~ "Apparel",
-    str_detect(segment_name, regex(
-      "bag|backpack|duffel|sack|ball|sock|headband|wristband|hat|cap|beanie|glove|sunglass|bottle|yoga mat|weight|resistance band|jump rope|knee pad|shin guard|ankle brace|compression sleeve",
-      ignore_case = TRUE)) ~ "Accessories & Equipment",
-    str_detect(segment_name, regex(
-      "flyknit|flywire|zoomx|zoom air|lunarlon|cushlon|shox|flyease|adapt|connected jersey",
-      ignore_case = TRUE)) ~ "Performance Technology",
-    TRUE ~ "Footwear"
-  )
-}
-
-nike_product_token_categories <- tibble(product_segment = nike_product_segments_raw) %>%
-  mutate(category = classify_nike_segment(product_segment)) %>%
-  unnest_tokens(segment_token, product_segment) %>%
-  filter(str_detect(segment_token, "^[a-z]{2,}$")) %>%
-  mutate(stem = SnowballC::wordStem(segment_token, language = "en")) %>%
-  count(stem, category, name = "segment_matches") %>%
-  group_by(stem) %>%
-  mutate(category_count  = n_distinct(category),
-         dominant_share   = segment_matches / sum(segment_matches)) %>%
-  slice_max(segment_matches, n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  filter(category_count == 1 | dominant_share >= 0.6) %>%
-  select(stem, category) %>%
-  distinct()
-
-nike_doc_categories <- nike_tokens %>%
-  inner_join(nike_product_token_categories, by = "stem") %>%
-  count(doc_id, category, name = "match_count") %>%
+nike_doc_categories <- nike_doc_product_matches %>%
+  count(doc_id, category, wt = matched_tokens, name = "match_count") %>%
   group_by(doc_id) %>%
   slice_max(match_count, n = 1, with_ties = FALSE) %>%
   ungroup()
@@ -787,19 +793,20 @@ categorized_summary <- sentiment_scored %>%
   group_by(category) %>%
   summarise(avg_sentiment = mean(sentiment_score, na.rm = TRUE),
             doc_count = n(), .groups = "drop") %>%
-  filter(doc_count >= MIN_DOC_COUNT) %>%
+  filter(doc_count >= MIN_DOC_COUNT, !near(avg_sentiment, 0)) %>%
   arrange(desc(avg_sentiment))
 
 ggplot(categorized_summary,
        aes(x = reorder(category, -avg_sentiment), y = avg_sentiment, fill = category)) +
   geom_col(alpha = 0.85, show.legend = FALSE) +
   scale_fill_manual(values = c(
-    "Footwear" = nike_accent, "Apparel" = "#2E8B57",
-    "Accessories & Equipment" = "#4E79A7", "Performance Technology" = "#9C755F"
+    "Footwear" = nike_accent,
+    "Apparel" = "#2E8B57",
+    "Accessories & Equipment" = "#4E79A7"
   )) +
   coord_flip() +
   labs(title = "Nike Pricing Sentiment by Product Category",
-       subtitle = "Each price-mentioned Nike comment assigned to its dominant category",
+       subtitle = "Each price-mentioned Nike comment assigned by best-matched Nike products from the category CSV",
        x = "Product Category", y = "Average Sentiment Score")
 ```
 
