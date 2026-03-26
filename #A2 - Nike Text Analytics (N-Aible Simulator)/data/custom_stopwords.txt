@@ -3,6 +3,8 @@ href
 amp
 www
 com
+lot
+lol
 relev
 filter
 page
@@ -28,6 +30,7 @@ armour
 armor
 shoe
 shoes
+ve
 app
 just
 really

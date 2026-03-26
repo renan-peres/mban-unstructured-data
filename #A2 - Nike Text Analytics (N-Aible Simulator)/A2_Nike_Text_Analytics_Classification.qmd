@@ -341,6 +341,12 @@ nike_product_lines <- read_terms_from_github(
   stem = TRUE
 )
 
+nike_product_segments_raw <- read_terms_from_github(
+  url = github_product_lines,
+  label = "product lines",
+  stem = FALSE
+)
+
 cat(sprintf("\n✓ Loaded %d sources total\n", length(source_frames)))
 ```
 
@@ -455,18 +461,56 @@ nike_doc_product_lines <- nike_tokens %>%
 nike_term_frequency <- nike_tokens %>%
   count(stem, sort = TRUE)
 
-category_map <- c(
-  "shoe" = "Footwear", "sneaker" = "Footwear", "run" = "Footwear",
-  "jordan" = "Footwear", "dunk" = "Footwear", "max" = "Footwear",
-  "shirt" = "Apparel", "hoodi" = "Apparel", "pant" = "Apparel",
-  "jacket" = "Apparel", "jersei" = "Apparel", "sock" = "Apparel"
-)
+classify_nike_segment <- function(segment_name) {
+  case_when(
+    str_detect(
+      segment_name,
+      regex(
+        "hoodie|sweatshirt|jacket|t-shirt|tank top|jersey|polo|shirt|pant|short|legging|tight|jogger|tracksuit|sweatpant|sports bra|yoga pant|dress|skirt|windbreaker|puffer|rain jacket|vest|swimwear|tech fleece|dri-fit|nike pro|livestrong|acg|nikelab|ispa",
+        ignore_case = TRUE
+      )
+    ) ~ "Apparel",
+    str_detect(
+      segment_name,
+      regex(
+        "bag|backpack|duffel|sack|ball|sock|headband|wristband|hat|cap|beanie|glove|sunglass|bottle|yoga mat|weight|resistance band|jump rope|knee pad|shin guard|ankle brace|compression sleeve",
+        ignore_case = TRUE
+      )
+    ) ~ "Accessories & Equipment",
+    str_detect(
+      segment_name,
+      regex(
+        "flyknit|flywire|zoomx|zoom air|lunarlon|cushlon|shox|flyease|adapt|connected jersey",
+        ignore_case = TRUE
+      )
+    ) ~ "Performance Technology",
+    TRUE ~ "Footwear"
+  )
+}
+
+nike_product_token_categories <- tibble(product_segment = nike_product_segments_raw) %>%
+  mutate(category = classify_nike_segment(product_segment)) %>%
+  unnest_tokens(segment_token, product_segment) %>%
+  filter(str_detect(segment_token, "^[a-z]{2,}$")) %>%
+  mutate(stem = SnowballC::wordStem(segment_token, language = "en")) %>%
+  count(stem, category, name = "segment_matches") %>%
+  group_by(stem) %>%
+  mutate(
+    category_count = n_distinct(category),
+    dominant_share = segment_matches / sum(segment_matches)
+  ) %>%
+  slice_max(segment_matches, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  filter(category_count == 1 | dominant_share >= 0.6) %>%
+  select(stem, category) %>%
+  distinct()
 
 nike_doc_categories <- nike_tokens %>%
-  mutate(category = category_map[stem]) %>%
-  filter(!is.na(category)) %>%
-  select(doc_id, category) %>%
-  distinct()
+  inner_join(nike_product_token_categories, by = "stem") %>%
+  count(doc_id, category, name = "match_count") %>%
+  group_by(doc_id) %>%
+  slice_max(match_count, n = 1, with_ties = FALSE) %>%
+  ungroup()
 
 sus_flagged <- tokens %>%
   mutate(
@@ -1009,17 +1053,21 @@ categorized_summary <- sentiment_scored %>%
     doc_count = n(),
     .groups = "drop"
   ) %>%
-  filter(doc_count >= 3)
+  filter(doc_count >= 3) %>%
+  arrange(desc(avg_sentiment))
 
-ggplot(categorized_summary, aes(x = category, y = avg_sentiment, fill = category)) +
+ggplot(categorized_summary, aes(x = reorder(category, -avg_sentiment), y = avg_sentiment, fill = category)) +
   geom_col(alpha = 0.85, show.legend = FALSE) +
   scale_fill_manual(values = c(
     "Footwear" = price_focus_color,
-    "Apparel" = unname(vocab_palette["Sustainability"])
+    "Apparel" = unname(vocab_palette["Sustainability"]),
+    "Accessories & Equipment" = "#4E79A7",
+    "Performance Technology" = "#9C755F"
   )) +
+  coord_flip() +
   labs(
-    title = "Pricing Sentiment: Footwear vs. Apparel",
-    subtitle = "Only Nike comments with explicit price mentions are included",
+    title = "Nike Pricing Sentiment by Product Category",
+    subtitle = "Each price-mentioned Nike comment is assigned to one dominant category inferred from Product Segments",
     x = "Product Category",
     y = "Average Sentiment Score"
   ) +
