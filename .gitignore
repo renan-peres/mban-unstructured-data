@@ -164,7 +164,8 @@ venv.bak/
 .ropeproject
 
 # mkdocs documentation
-/site
+# /site  -- intentionally tracked; contains Shinylive export for Netlify
+!/site
 
 # mypy
 .mypy_cache/

@@ -1,0 +1,7 @@
+[build]
+  publish = "site"
+
+[[redirects]]
+  from = "/"
+  to = "/airbnb-shinylive/"
+  status = 301
