@@ -421,6 +421,7 @@ server <- function(input, output, session) {
         room_type = .data$room_type,
         price = scales::dollar(.data$price),
         rating = round(.data[["review_scores.review_scores_rating"]], 1),
+        image_url = .data[["images.picture_url"]],
         url = ifelse(
           is.na(.data$listing_url) | .data$listing_url == "",
           "",
@@ -436,14 +437,30 @@ server <- function(input, output, session) {
           scrollX = TRUE,
           dom = "Bfrtip",
           buttons = c("copy", "csv", "excel", "pdf", "print"),
+          columnDefs = list(list(targets = 7, visible = FALSE)),
+          drawCallback = JS(
+            "function(settings) {",
+            "  var api = this.api();",
+            "  var $rows = $('[data-toggle=\"tooltip\"]', api.table().body());",
+            "  $rows.tooltip('destroy');",
+            "  $rows.tooltip({container: 'body', html: true, trigger: 'hover', placement: 'auto'});",
+            "}"
+          ),
           createdRow = JS(
             "function(row, data, dataIndex) {",
-            "  var tip = data[0]",
-            "    + ' | ' + data[4]",
-            "    + ' | ' + data[3]",
-            "    + ' | Price: ' + data[5]",
-            "    + ' | Rating: ' + (data[6] === null ? 'N/A' : data[6]);",
-            "  $(row).attr('title', tip);",
+            "  var rating = (data[6] === null || data[6] === '' || typeof data[6] === 'undefined') ? 'N/A' : data[6];",
+            "  var image = data[7] || '';",
+            "  var tip = '<div style=\"max-width:100px;\">'",
+            "    + '<strong>' + data[0] + '</strong><br>'",
+            "    + data[4] + ' | ' + data[3] + '<br>'",
+            "    + 'Price: ' + data[5] + ' | Rating: ' + rating",
+            "    + (image ? '<br><img src=\"' + image + '\" style=\"width:80px;max-width:100%;height:auto;margin-top:6px;border-radius:6px;\">' : '')",
+            "    + '</div>';",
+            "  $(row)",
+            "    .attr('data-toggle', 'tooltip')",
+            "    .attr('data-html', 'true')",
+            "    .attr('data-placement', 'auto')",
+            "    .attr('title', tip);",
             "}"
           )
         )
@@ -453,6 +470,8 @@ server <- function(input, output, session) {
   output$price_plot <- renderPlotly({
     data <- filtered_data()
     validate(need(nrow(data) > 0, "No listings match the selected filters."))
+
+    x <- NULL
     
     p <- ggplot(data, aes(.data$price)) +
       geom_histogram(bins = 30, fill = "#2C7FB8", color = "white",
