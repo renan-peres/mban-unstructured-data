@@ -1,9 +1,6 @@
-####################################
-# 0. Install/Load Libraries
-####################################
-
+## Install Packages
 # options(download.file.method = "libcurl")
-# install.packages(c("leaflet", "arrow", "DT", "plotly", "scales", "tidyverse", "curl"), repos = "https://cloud.r-project.org")
+# install.packages("leaflet", repos = "https://cloud.r-project.org")
 
 library(shiny)
 library(arrow)
@@ -11,24 +8,18 @@ library(curl)
 library(dplyr)
 library(tidyr)
 library(tidytext)
+library(textdata)
 library(ggplot2)
-library(stringr)
 library(DT)
 library(plotly)
 library(scales)
 
-####################################
-# 1. Load Data
-####################################
-
-## Load from GitHub
 airbnb_url <- paste0(
   "https://github.com/renan-peres/mban-unstructured-data/raw/",
   "refs/heads/main/%23A1%20-%20AirBnb%20Text%20Mining%20%26%20NLP/",
   "data/airbnb_all.parquet"
 )
 
-## Load from Local Directory
 airbnb_local_path <- file.path("data", "airbnb_all.parquet")
 
 text_cols <- c(
@@ -36,20 +27,41 @@ text_cols <- c(
   "notes", "transit", "access", "interaction", "house_rules"
 )
 
+required_cols <- unique(c(
+  text_cols,
+  "address.location.coordinates",
+  "address.country",
+  "address.market",
+  "room_type",
+  "price",
+  "host.host_is_superhost",
+  "review_scores.review_scores_rating",
+  "listing_url",
+  "images.picture_url",
+  "name",
+  "address.street",
+  "property_type"
+))
+
+read_airbnb_parquet <- function(source) {
+  arrow::read_parquet(
+    source,
+    col_select = any_of(required_cols),
+    as_data_frame = TRUE
+  )
+}
+
 load_airbnb <- function() {
   if (file.exists(airbnb_local_path)) {
     message("Loading Airbnb data from local parquet: ", airbnb_local_path)
-    return(arrow::read_parquet(airbnb_local_path, as_data_frame = TRUE))
+    return(read_airbnb_parquet(airbnb_local_path))
   }
-  
+
   message("Local parquet not found. Loading Airbnb data from GitHub.")
   raw_parquet <- curl::curl_fetch_memory(airbnb_url)$content
-  arrow::read_parquet(arrow::BufferReader$create(raw_parquet), as_data_frame = TRUE)
+  read_airbnb_parquet(arrow::BufferReader$create(raw_parquet))
 }
 
-####################################
-# 2. Prepare the Data
-####################################
 parse_coordinates <- function(x, index) {
   parts <- strsplit(gsub("\\[|\\]", "", x), ",")
   vapply(
@@ -62,57 +74,266 @@ parse_coordinates <- function(x, index) {
   )
 }
 
-# Load Data
+build_listing_text <- function(data) {
+  available_text_cols <- intersect(text_cols, names(data))
+
+  if (!length(available_text_cols)) {
+    data$text <- ""
+    return(data)
+  }
+
+  data |>
+    mutate(across(all_of(available_text_cols), ~ replace_na(as.character(.x), ""))) |>
+    unite("text", all_of(available_text_cols), sep = " ", remove = TRUE, na.rm = TRUE)
+}
+
+tokenize_words <- function(data) {
+  data |>
+    select(all_of(c("row_id", "text"))) |>
+    unnest_tokens("word", "text")
+}
+
+tokenize_bigrams <- function(data, stop_words) {
+  data |>
+    select(all_of(c("row_id", "text"))) |>
+    unnest_tokens("bigram", "text", token = "ngrams", n = 2) |>
+    separate("bigram", c("word1", "word2"), sep = " ", fill = "right") |>
+    filter(!.data$word1 %in% stop_words, !.data$word2 %in% stop_words) |>
+    unite("bigram", c("word1", "word2"), sep = " ")
+}
+
+add_counts_to_env <- function(values, store) {
+  if (!length(values)) return(invisible())
+
+  values <- values[!is.na(values) & nzchar(values)]
+  if (!length(values)) return(invisible())
+
+  counts <- table(values, useNA = "no")
+  keys <- names(counts)
+  for (i in seq_along(keys)) {
+    key <- keys[[i]]
+    current <- store[[key]]
+    increment <- as.numeric(counts[[i]])
+    store[[key]] <- if (is.null(current)) increment else current + increment
+  }
+
+  invisible()
+}
+
+env_counts_to_tibble <- function(store, key_name) {
+  keys <- ls(store, all.names = TRUE)
+  if (!length(keys)) {
+    return(tibble::tibble())
+  }
+
+  counts <- vapply(keys, function(k) as.numeric(store[[k]]), numeric(1))
+  out <- tibble::tibble(key = keys, n = counts)
+  names(out)[1] <- key_name
+  out
+}
+
+compute_text_metrics <- function(data, stop_words, afinn_lex, bing_lex, nrc_lex, top_n = 10, chunk_size = 250) {
+  empty_result <- list(
+    token_count = 0,
+    word_top = tibble::tibble(word = character(), n = numeric()),
+    bigram_top = tibble::tibble(bigram = character(), n = numeric()),
+    sentiment_scores = tibble::tibble(method = character(), sentiment = numeric()),
+    bing_top = tibble::tibble(sentiment = character(), word = character(), n = numeric())
+  )
+
+  if (!nrow(data)) return(empty_result)
+
+  word_counts <- new.env(hash = TRUE, parent = emptyenv())
+  bigram_counts <- new.env(hash = TRUE, parent = emptyenv())
+  bing_word_counts <- new.env(hash = TRUE, parent = emptyenv())
+
+  token_count <- 0
+  afinn_score <- 0
+  bing_counts <- c(positive = 0, negative = 0)
+  nrc_counts <- c(positive = 0, negative = 0)
+
+  split_index <- split(seq_len(nrow(data)), ceiling(seq_len(nrow(data)) / chunk_size))
+
+  for (idx in split_index) {
+    chunk <- data[idx, c("row_id", "text"), drop = FALSE]
+
+    words_chunk <- tokenize_words(chunk)
+    if (nrow(words_chunk)) {
+      filtered_words <- words_chunk$word[!words_chunk$word %in% stop_words]
+      token_count <- token_count + length(filtered_words)
+      add_counts_to_env(filtered_words, word_counts)
+
+      afinn_chunk <- inner_join(words_chunk, afinn_lex, by = "word")
+      if (nrow(afinn_chunk)) {
+        afinn_score <- afinn_score + sum(afinn_chunk$value)
+      }
+
+      bing_chunk <- inner_join(words_chunk, bing_lex, by = "word")
+      if (nrow(bing_chunk)) {
+        sentiment_totals <- table(bing_chunk$sentiment, useNA = "no")
+        for (sent in names(sentiment_totals)) {
+          if (sent %in% names(bing_counts)) {
+            bing_counts[[sent]] <- bing_counts[[sent]] + as.numeric(sentiment_totals[[sent]])
+          }
+        }
+
+        add_counts_to_env(paste(bing_chunk$sentiment, bing_chunk$word, sep = "\r"), bing_word_counts)
+      }
+
+      nrc_chunk <- inner_join(words_chunk, nrc_lex, by = "word", relationship = "many-to-many")
+      if (nrow(nrc_chunk)) {
+        sentiment_totals <- table(nrc_chunk$sentiment, useNA = "no")
+        for (sent in names(sentiment_totals)) {
+          if (sent %in% names(nrc_counts)) {
+            nrc_counts[[sent]] <- nrc_counts[[sent]] + as.numeric(sentiment_totals[[sent]])
+          }
+        }
+      }
+    }
+
+    bigrams_chunk <- tokenize_bigrams(chunk, stop_words)
+    if (nrow(bigrams_chunk)) {
+      add_counts_to_env(bigrams_chunk$bigram, bigram_counts)
+    }
+
+    rm(chunk, words_chunk, filtered_words, afinn_chunk, bing_chunk, nrc_chunk, bigrams_chunk)
+    invisible(gc(FALSE))
+  }
+
+  word_top <- env_counts_to_tibble(word_counts, "word") |>
+    arrange(desc(.data$n)) |>
+    slice_head(n = top_n)
+
+  bigram_top <- env_counts_to_tibble(bigram_counts, "bigram") |>
+    arrange(desc(.data$n)) |>
+    slice_head(n = top_n)
+
+  bing_top <- env_counts_to_tibble(bing_word_counts, "key")
+  if (nrow(bing_top)) {
+    bing_top <- bing_top |>
+      separate("key", c("sentiment", "word"), sep = "\r") |>
+      group_by(.data$sentiment) |>
+      arrange(desc(.data$n), .by_group = TRUE) |>
+      slice_head(n = top_n) |>
+      ungroup()
+  } else {
+    bing_top <- tibble::tibble(sentiment = character(), word = character(), n = numeric())
+  }
+
+  sentiment_scores <- tibble::tibble(
+    method = c("AFINN", "Bing", "NRC"),
+    sentiment = c(
+      afinn_score,
+      unname(bing_counts[["positive"]] - bing_counts[["negative"]]),
+      unname(nrc_counts[["positive"]] - nrc_counts[["negative"]])
+    )
+  )
+
+  list(
+    token_count = token_count,
+    word_top = word_top,
+    bigram_top = bigram_top,
+    sentiment_scores = sentiment_scores,
+    bing_top = bing_top
+  )
+}
+
 airbnb_data <- load_airbnb() |>
   mutate(row_id = row_number()) |>
-  mutate(across(any_of(text_cols), ~ replace_na(as.character(.x), ""))) |>
-  unite("text", any_of(text_cols), sep = " ", remove = FALSE, na.rm = TRUE) |>
+  build_listing_text() |>
   mutate(
     text = trimws(text),
     longitude = parse_coordinates(.data[["address.location.coordinates"]], 1),
     latitude = parse_coordinates(.data[["address.location.coordinates"]], 2)
+  ) |>
+  select(any_of(c(
+    "row_id",
+    "text",
+    "longitude",
+    "latitude",
+    "address.country",
+    "address.market",
+    "room_type",
+    "price",
+    "host.host_is_superhost",
+    "review_scores.review_scores_rating",
+    "listing_url",
+    "images.picture_url",
+    "name",
+    "address.street",
+    "property_type"
+  )))
+
+invisible(gc())
+
+stop_words_vec <- tidytext::stop_words$word
+
+ensure_textdata_cache <- function() {
+  if (interactive()) return(invisible())
+
+  cache_dir <- rappdirs::user_cache_dir("textdata")
+  targets <- list(
+    list(data_name = "afinn", file_name = "afinn_111.rds"),
+    list(data_name = "bing", file_name = "bing.rds"),
+    list(data_name = "nrc", file_name = "NRCWordEmotion.rds")
   )
 
+  for (target in targets) {
+    folder_path <- file.path(cache_dir, target$data_name)
+    output_path <- file.path(folder_path, target$file_name)
 
-# Tokenize
-all_words <- airbnb_data |>
-  select(all_of(c("row_id", "text"))) |>
-  unnest_tokens("word", "text")
+    if (file.exists(output_path)) next
 
-# Remove Stop Words and Steamming
-all_tokens <- all_words |>
-  anti_join(tidytext::stop_words) |>
-  filter(str_detect(word, "^[a-z]{2,}$")) |>
-  mutate(word = SnowballC::wordStem(word, language = "en")) 
+    dir.create(folder_path, recursive = TRUE, showWarnings = FALSE)
 
-# Bigrams
-all_bigrams <- airbnb_data |>
-  select(all_of(c("row_id", "text"))) |>
-  unnest_tokens("bigram", "text", token = "ngrams", n = 2) |>
-  separate("bigram", c("word1", "word2"), sep = " ", fill = "right") |>
-  filter(!.data$word1 %in% stop_words_vec, !.data$word2 %in% stop_words_vec) |>
-  unite("bigram", c("word1", "word2"), sep = " ")
+    tryCatch(
+      {
+        textdata:::download_functions[[target$data_name]](folder_path)
+        textdata:::process_functions[[target$data_name]](folder_path, output_path)
+      },
+      error = function(e) {
+        stop(
+          paste0(
+            "Failed to prepare textdata cache for ", target$data_name,
+            ". Underlying error: ", conditionMessage(e)
+          ),
+          call. = FALSE
+        )
+      }
+    )
+  }
 
-# Lexicons
-afinn_lex <- get_sentiments("afinn")
-bing_lex  <- get_sentiments("bing")
-nrc_lex   <- get_sentiments("nrc") |>
-  filter(.data$sentiment %in% c("positive", "negative"))
+  invisible()
+}
 
-all_afinn <- inner_join(all_words, afinn_lex, by = "word")
-all_bing  <- inner_join(all_words, bing_lex, by = "word")
-all_nrc   <- inner_join(all_words, nrc_lex, by = "word", relationship = "many-to-many")
+load_sentiment_lexicons <- function() {
+  if (!requireNamespace("textdata", quietly = TRUE)) {
+    stop(
+      "Package 'textdata' is required to load sentiment lexicons on shinyapps.io.",
+      call. = FALSE
+    )
+  }
+
+  ensure_textdata_cache()
+
+  list(
+    afinn = textdata::lexicon_afinn(),
+    bing = textdata::lexicon_bing(),
+    nrc = textdata::lexicon_nrc() |>
+      filter(.data$sentiment %in% c("positive", "negative"))
+  )
+}
+
+lexicons <- load_sentiment_lexicons()
+afinn_lex <- lexicons$afinn
+bing_lex  <- lexicons$bing
+nrc_lex   <- lexicons$nrc
 
 countries <- sort(unique(stats::na.omit(airbnb_data[["address.country"]])))
 cities <- sort(unique(stats::na.omit(airbnb_data[["address.market"]])) )
 room_types <- sort(unique(stats::na.omit(airbnb_data$room_type)))
 price_limits <- range(airbnb_data$price, na.rm = TRUE)
 top_terms_n <- 10
-
-
-####################################
-# 3. Dashboarding
-####################################
 
 ui <- fluidPage(
   tags$head(
@@ -342,25 +563,17 @@ server <- function(input, output, session) {
   })
   
   filtered_data <- filtered_data_raw |> debounce(300)
-  
-  # --- Filter pre-computed tokens/sentiments by matching row_id ---
-  filtered_ids <- reactive({
-    filtered_data()$row_id
-  })
-  
-  words <- reactive({
-    ids <- filtered_ids()
-    all_words[all_words$row_id %in% ids, ]
-  })
-  
-  tokens <- reactive({
-    ids <- filtered_ids()
-    all_tokens[all_tokens$row_id %in% ids, ]
-  })
-  
-  bigrams <- reactive({
-    ids <- filtered_ids()
-    all_bigrams[all_bigrams$row_id %in% ids, ]
+
+  text_metrics <- reactive({
+    compute_text_metrics(
+      data = filtered_data(),
+      stop_words = stop_words_vec,
+      afinn_lex = afinn_lex,
+      bing_lex = bing_lex,
+      nrc_lex = nrc_lex,
+      top_n = top_terms_n,
+      chunk_size = 250
+    )
   })
   
   mapped_data <- reactive({
@@ -383,7 +596,7 @@ server <- function(input, output, session) {
     round(rating, 1)
   })
   
-  output$token_count <- renderText(scales::comma(nrow(tokens())))
+  output$token_count <- renderText(scales::comma(text_metrics()$token_count))
   
   # --- Map: render base tiles once, update markers via proxy ---
   output$map <- leaflet::renderLeaflet({
@@ -404,35 +617,18 @@ server <- function(input, output, session) {
       "N/A",
       round(data[["review_scores.review_scores_rating"]], 1)
     )
-    
+
     url_html <- ifelse(
       is.na(data$listing_url) | data$listing_url == "",
       "",
-      paste0("<a href=\"", data$listing_url, "\" target=\"_blank\" style=\"color:#2C7FB8;\">View on Airbnb</a><br>")
+      paste0("<br><a href=\"", data$listing_url, "\" target=\"_blank\" style=\"color:#2C7FB8;\">View on Airbnb</a>")
     )
-    
-    label_html <- ifelse(
-      is.na(data[["images.picture_url"]]) | data[["images.picture_url"]] == "",
-      paste0(
-        "<strong>", data$name, "</strong><br>",
-        data[["address.street"]], "<br>",
-        data[["address.country"]], "<br>",
-        data$room_type, " | ", data$property_type, "<br>",
-        "Price: ", scales::dollar(data$price), "<br>",
-        "Rating: ", rating_label, "<br>",
-        url_html
-      ),
-      paste0(
-        "<strong>", data$name, "</strong><br>",
-        "<img src=\"", data[["images.picture_url"]],
-        "\" style=\"width:220px;max-width:100%;height:auto;margin:8px 0;border-radius:6px;\"><br>",
-        data[["address.street"]], "<br>",
-        data[["address.country"]], "<br>",
-        data$room_type, " | ", data$property_type, "<br>",
-        "Price: ", scales::dollar(data$price), "<br>",
-        "Rating: ", rating_label, "<br>",
-        url_html
-      )
+
+    popup_html <- paste0(
+      "<strong>", htmltools::htmlEscape(data$name), "</strong><br>",
+      "Price: ", scales::dollar(data$price), "<br>",
+      "Rating: ", rating_label,
+      url_html
     ) |> lapply(htmltools::HTML)
     
     proxy |>
@@ -445,19 +641,8 @@ server <- function(input, output, session) {
         stroke = FALSE,
         fillOpacity = 0.7,
         color = "#2C7FB8",
-        popup = label_html,
-        label = label_html,
-        labelOptions = leaflet::labelOptions(
-          style = list(
-            "font-size" = "13px",
-            "padding" = "8px 12px",
-            "max-width" = "300px",
-            "background-color" = "white",
-            "border-radius" = "8px",
-            "box-shadow" = "0 2px 6px rgba(0,0,0,0.15)"
-          ),
-          direction = "auto"
-        )
+        popup = popup_html,
+        clusterOptions = leaflet::markerClusterOptions()
       ) |>
       leaflet::fitBounds(
         lng1 = min(data$longitude, na.rm = TRUE),
@@ -526,7 +711,7 @@ server <- function(input, output, session) {
   output$price_plot <- renderPlotly({
     data <- filtered_data()
     validate(need(nrow(data) > 0, "No listings match the selected filters."))
-    
+
     x <- NULL
     
     p <- ggplot(data, aes(.data$price)) +
@@ -540,9 +725,7 @@ server <- function(input, output, session) {
   })
   
   output$word_plot <- renderPlotly({
-    data <- tokens() |>
-      count(.data$word, sort = TRUE) |>
-      slice_head(n = top_terms_n) |>
+    data <- text_metrics()$word_top |>
       mutate(word = reorder(.data$word, .data$n))
     
     validate(need(nrow(data) > 0, "No tokens available for the selected filters."))
@@ -556,9 +739,7 @@ server <- function(input, output, session) {
   })
   
   output$bigram_plot <- renderPlotly({
-    data <- bigrams() |>
-      count(.data$bigram, sort = TRUE) |>
-      slice_head(n = top_terms_n) |>
+    data <- text_metrics()$bigram_top |>
       mutate(bigram = reorder(.data$bigram, .data$n))
     
     validate(need(nrow(data) > 0, "No bigrams available for the selected filters."))
@@ -572,25 +753,7 @@ server <- function(input, output, session) {
   })
   
   output$sentiment_plot <- renderPlotly({
-    ids <- filtered_ids()
-    
-    afinn_data <- all_afinn[all_afinn$row_id %in% ids, ]
-    bing_data  <- all_bing[all_bing$row_id %in% ids, ]
-    nrc_data   <- all_nrc[all_nrc$row_id %in% ids, ]
-    
-    data <- bind_rows(
-      afinn_data |>
-        summarise(sentiment = sum(.data$value)) |>
-        mutate(method = "AFINN"),
-      bind_rows(
-        bing_data |> mutate(method = "Bing"),
-        nrc_data |> mutate(method = "NRC")
-      ) |>
-        count(.data$method, .data$sentiment) |>
-        spread("sentiment", "n", fill = 0) |>
-        mutate(sentiment = .data$positive - .data$negative) |>
-        select(all_of(c("method", "sentiment")))
-    )
+    data <- text_metrics()$sentiment_scores
     
     validate(need(any(is.finite(data$sentiment)), "No sentiment words were found for the selected filters."))
     
@@ -603,13 +766,7 @@ server <- function(input, output, session) {
   })
   
   output$bing_plot <- renderPlotly({
-    bing_data <- all_bing[all_bing$row_id %in% filtered_ids(), ]
-    
-    data <- bing_data |>
-      count(.data$sentiment, .data$word, sort = TRUE) |>
-      group_by(.data$sentiment) |>
-      slice_head(n = top_terms_n) |>
-      ungroup() |>
+    data <- text_metrics()$bing_top |>
       mutate(word = reorder(.data$word, .data$n))
     
     validate(need(nrow(data) > 0, "No positive or negative words were found for the selected filters."))
