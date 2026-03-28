@@ -1,4 +1,4 @@
-# Install Packages
+## Install Packages
 # options(download.file.method = "libcurl")
 # install.packages("leaflet", repos = "https://cloud.r-project.org")
 
@@ -10,6 +10,7 @@ library(tidyr)
 library(tidytext)
 library(ggplot2)
 library(DT)
+library(plotly)
 library(scales)
 
 airbnb_url <- paste0(
@@ -84,7 +85,76 @@ top_terms_n <- 10
 
 ui <- fluidPage(
   tags$head(
-    tags$style(HTML("\n            #app-layout { display: flex; gap: 18px; align-items: flex-start; }\n            #sidebar-column { width: 26%; min-width: 260px; }\n            #main-column { width: 74%; }\n            #toggle_sidebar { margin-bottom: 12px; }\n            body.sidebar-collapsed #sidebar-column { display: none; }\n            body.sidebar-collapsed #main-column { width: 100%; }\n            @media (max-width: 992px) {\n                #app-layout { display: block; }\n                #sidebar-column, #main-column { width: 100%; }\n                body.sidebar-collapsed #sidebar-column { display: none; }\n            }\n        ")),
+    tags$style(HTML("
+            body { background-color: #e9ecef; }
+            h2 { color: #2c3e50; }
+
+            #app-layout { display: flex; gap: 18px; align-items: flex-start; }
+            #sidebar-column { width: 26%; min-width: 260px; }
+            #sidebar-column .well {
+                background-color: #2c3e50;
+                color: #ecf0f1;
+                border: none;
+                border-radius: 8px;
+            }
+            #sidebar-column .well label,
+            #sidebar-column .well .control-label,
+            #sidebar-column .well .help-block {
+                color: #dce1e6;
+            }
+
+            #main-column { width: 74%; }
+            #main-column .well {
+                background-color: #ffffff;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            }
+            #main-column .tab-content {
+                background-color: #ffffff;
+                border: 1px solid #dee2e6;
+                border-top: none;
+                border-radius: 0 0 8px 8px;
+                padding: 12px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            }
+            .nav-tabs > li.active > a,
+            .nav-tabs > li.active > a:hover,
+            .nav-tabs > li.active > a:focus {
+                background-color: #ffffff;
+                border-bottom-color: #ffffff;
+            }
+            .shiny-plot-output,
+            .plotly.html-widget-output {
+                background-color: #ffffff;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 8px;
+                margin-bottom: 12px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            }
+            .tab-content .row .col-sm-6 {
+                padding-left: 8px;
+                padding-right: 8px;
+            }
+
+            #toggle_sidebar {
+                margin-bottom: 12px;
+                background-color: #2c3e50;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+            }
+            #toggle_sidebar:hover { background-color: #34495e; }
+
+            body.sidebar-collapsed #sidebar-column { display: none; }
+            body.sidebar-collapsed #main-column { width: 100%; }
+            @media (max-width: 992px) {
+                #app-layout { display: block; }
+                #sidebar-column, #main-column { width: 100%; }
+                body.sidebar-collapsed #sidebar-column { display: none; }
+            }
+        ")),
     tags$script(HTML("\n            Shiny.addCustomMessageHandler('toggleSidebar', function(message) {\n                document.body.classList.toggle('sidebar-collapsed');\n            });\n        "))
   ),
   titlePanel("Airbnb Text Mining and NLP"),
@@ -132,13 +202,13 @@ ui <- fluidPage(
           tabsetPanel(
             tabPanel(
               "Frequency Distributions",
-              plotOutput("price_plot"),
+              plotlyOutput("price_plot"),
               fluidRow(
-                column(6, plotOutput("word_plot")),
-                column(6, plotOutput("bigram_plot"))
+                column(6, plotlyOutput("word_plot")),
+                column(6, plotlyOutput("bigram_plot"))
               )
             ),
-            tabPanel("Sentiment", plotOutput("sentiment_plot"), plotOutput("bing_plot"))
+            tabPanel("Sentiment", plotlyOutput("sentiment_plot"), plotlyOutput("bing_plot"))
           )
         )
       )
@@ -230,7 +300,7 @@ server <- function(input, output, session) {
     
     if (nrow(data) == 0) return()
     
-    popup_html <- ifelse(
+    label_html <- ifelse(
       is.na(data[["images.picture_url"]]) | data[["images.picture_url"]] == "",
       paste0(
         "<strong>", data$name, "</strong><br>",
@@ -248,7 +318,7 @@ server <- function(input, output, session) {
         data$room_type, " | ", data$property_type, "<br>",
         "Price: ", scales::dollar(data$price)
       )
-    )
+    ) |> lapply(htmltools::HTML)
     
     proxy |>
       leaflet::addCircleMarkers(
@@ -260,11 +330,11 @@ server <- function(input, output, session) {
         stroke = FALSE,
         fillOpacity = 0.7,
         color = "#2C7FB8",
-        popup = popup_html,
-        popupOptions = leaflet::popupOptions(
-          offset = c(0, 18),
-          autoPan = TRUE,
-          closeButton = TRUE
+        label = label_html,
+        labelOptions = leaflet::labelOptions(
+          style = list("font-size" = "13px", "padding" = "6px 10px"),
+          direction = "auto",
+          textsize = "13px"
         )
       ) |>
       leaflet::fitBounds(
@@ -286,21 +356,31 @@ server <- function(input, output, session) {
         price = scales::dollar(.data$price),
         rating = round(.data[["review_scores.review_scores_rating"]], 1)
       ) |>
-      datatable(rownames = FALSE, options = list(pageLength = 10, scrollX = TRUE))
+      datatable(
+        rownames = FALSE,
+        extensions = "Buttons",
+        options = list(
+          pageLength = 10,
+          scrollX = TRUE,
+          dom = "Bfrtip",
+          buttons = c("copy", "csv", "excel", "pdf", "print")
+        )
+      )
   })
   
-  output$price_plot <- renderPlot({
+  output$price_plot <- renderPlotly({
     data <- filtered_data()
     validate(need(nrow(data) > 0, "No listings match the selected filters."))
     
-    ggplot(data, aes(.data$price)) +
+    p <- ggplot(data, aes(.data$price)) +
       geom_histogram(bins = 30, fill = "#2C7FB8", color = "white") +
       scale_x_continuous(labels = scales::label_dollar()) +
       labs(title = "Nightly Price Distribution", x = "Nightly price", y = "Listings") +
       theme_minimal(base_size = 12)
+    ggplotly(p, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
   })
   
-  output$word_plot <- renderPlot({
+  output$word_plot <- renderPlotly({
     data <- tokens() |>
       count(.data$word, sort = TRUE) |>
       slice_head(n = top_terms_n) |>
@@ -308,14 +388,15 @@ server <- function(input, output, session) {
     
     validate(need(nrow(data) > 0, "No tokens available for the selected filters."))
     
-    ggplot(data, aes(.data$word, .data$n)) +
+    p <- ggplot(data, aes(.data$word, .data$n)) +
       geom_col(fill = "#41AE76") +
       coord_flip() +
       labs(title = "Most Frequent Words", x = NULL, y = "Count") +
       theme_minimal(base_size = 12)
+    ggplotly(p, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
   })
   
-  output$bigram_plot <- renderPlot({
+  output$bigram_plot <- renderPlotly({
     data <- bigrams() |>
       count(.data$bigram, sort = TRUE) |>
       slice_head(n = top_terms_n) |>
@@ -323,14 +404,15 @@ server <- function(input, output, session) {
     
     validate(need(nrow(data) > 0, "No bigrams available for the selected filters."))
     
-    ggplot(data, aes(.data$bigram, .data$n)) +
+    p <- ggplot(data, aes(.data$bigram, .data$n)) +
       geom_col(fill = "#DD6E42") +
       coord_flip() +
       labs(title = "Most Frequent Bigrams", x = NULL, y = "Count") +
       theme_minimal(base_size = 12)
+    ggplotly(p, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
   })
   
-  output$sentiment_plot <- renderPlot({
+  output$sentiment_plot <- renderPlotly({
     ids <- filtered_ids()
     
     afinn_data <- all_afinn[all_afinn$row_id %in% ids, ]
@@ -353,14 +435,15 @@ server <- function(input, output, session) {
     
     validate(need(any(is.finite(data$sentiment)), "No sentiment words were found for the selected filters."))
     
-    ggplot(data, aes(.data$method, .data$sentiment, fill = .data$method)) +
+    p <- ggplot(data, aes(.data$method, .data$sentiment, fill = .data$method)) +
       geom_col(show.legend = FALSE) +
       facet_wrap(~method, ncol = 1, scales = "free_y") +
       labs(title = "Sentiment by Lexicon", x = NULL, y = "Sentiment score") +
       theme_minimal(base_size = 12)
+    ggplotly(p, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
   })
   
-  output$bing_plot <- renderPlot({
+  output$bing_plot <- renderPlotly({
     bing_data <- all_bing[all_bing$row_id %in% filtered_ids(), ]
     
     data <- bing_data |>
@@ -372,12 +455,13 @@ server <- function(input, output, session) {
     
     validate(need(nrow(data) > 0, "No positive or negative words were found for the selected filters."))
     
-    ggplot(data, aes(.data$word, .data$n, fill = .data$sentiment)) +
+    p <- ggplot(data, aes(.data$word, .data$n, fill = .data$sentiment)) +
       geom_col(show.legend = FALSE) +
       facet_wrap(~sentiment, scales = "free_y") +
       coord_flip() +
       labs(title = "Most Common Positive and Negative Words", x = NULL, y = "Count") +
       theme_minimal(base_size = 12)
+    ggplotly(p, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
   })
 }
 
