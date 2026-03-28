@@ -25,6 +25,16 @@ prepare_for_parquet <- function(df) {
 		}
 	}
 
+	character_columns <- vapply(flattened_df, is.character, logical(1))
+	flattened_df[character_columns] <- lapply(
+		flattened_df[character_columns],
+		trimws
+	)
+
+	if ("name" %in% names(flattened_df)) {
+		flattened_df$name <- tools::toTitleCase(flattened_df$name)
+	}
+
 	flattened_df
 }
 
