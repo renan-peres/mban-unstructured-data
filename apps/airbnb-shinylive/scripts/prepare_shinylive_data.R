@@ -28,12 +28,20 @@ parse_coordinates <- function(x, index) {
 
 # Navigate to repo root (3 levels up from scripts/)
 repo_root <- normalizePath("../../..", winslash = "/")
-source_parquet <- file.path(repo_root, "#A1 - AirBnb Text Mining & NLP", "data", "airbnb_all.parquet")
+source_candidates <- c(
+  file.path(repo_root, "#A1 - AirBnb Text Mining & NLP", "data", "airbnb_all.parquet"),
+  file.path(repo_root, "#A1 - AirBnb Text Mining & NLP", "airbnb-text-mining-nlp", "data", "airbnb_all.parquet")
+)
+source_parquet <- source_candidates[file.exists(source_candidates)][1]
 out_dir <- file.path(repo_root, "apps", "airbnb-shinylive", "data")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-if (!file.exists(source_parquet)) {
-  stop("Could not find source parquet file at: ", source_parquet, "\nWorking directory: ", getwd())
+if (is.na(source_parquet) || !file.exists(source_parquet)) {
+  stop(
+    "Could not find source parquet file. Checked:\n",
+    paste0("- ", source_candidates, collapse = "\n"),
+    "\nWorking directory: ", getwd()
+  )
 }
 
 airbnb_data <- arrow::read_parquet(source_parquet, as_data_frame = TRUE) |>
@@ -80,7 +88,7 @@ ensure_textdata_lexicon <- function(name, rds_name) {
 
 ensure_textdata_lexicon("afinn", "afinn_111.rds")
 ensure_textdata_lexicon("bing", "bing.rds")
-ensure_textdata_lexicon("nrc", "nrc.rds")
+ensure_textdata_lexicon("nrc", "NRCWordEmotion.rds")
 
 afinn_lex <- get_sentiments("afinn")
 bing_lex <- get_sentiments("bing")
