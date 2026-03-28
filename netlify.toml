@@ -2,3 +2,18 @@
   from = "/"
   to = "/airbnb-shinylive/"
   status = 301
+
+[[headers]]
+  for = "/airbnb-shinylive/app.json"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/shinylive/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/airbnb-shinylive/*"
+  [headers.values]
+    Cache-Control = "public, max-age=600"
