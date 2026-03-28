@@ -91,6 +91,14 @@ ui <- fluidPage(
 
             #app-layout { display: flex; gap: 18px; align-items: flex-start; }
             #sidebar-column { width: 26%; min-width: 260px; }
+            #sidebar-column.sidebar-fixed {
+                position: fixed;
+                top: 18px;
+                max-height: calc(100vh - 36px);
+                overflow-y: auto;
+                z-index: 1000;
+            }
+            #sidebar-placeholder { display: none; flex-shrink: 0; }
             #sidebar-column .well {
                 background-color: #2c3e50;
                 color: #ecf0f1;
@@ -148,6 +156,7 @@ ui <- fluidPage(
             #toggle_sidebar:hover { background-color: #34495e; }
 
             body.sidebar-collapsed #sidebar-column { display: none; }
+            body.sidebar-collapsed #sidebar-placeholder { display: none !important; }
             body.sidebar-collapsed #main-column { width: 100%; }
             @media (max-width: 992px) {
                 #app-layout { display: block; }
@@ -155,7 +164,41 @@ ui <- fluidPage(
                 body.sidebar-collapsed #sidebar-column { display: none; }
             }
         ")),
-    tags$script(HTML("\n            Shiny.addCustomMessageHandler('toggleSidebar', function(message) {\n                document.body.classList.toggle('sidebar-collapsed');\n            });\n        "))
+    tags$script(HTML("
+            Shiny.addCustomMessageHandler('toggleSidebar', function(message) {
+                document.body.classList.toggle('sidebar-collapsed');
+            });
+
+            $(document).ready(function() {
+                var $sidebar = $('#sidebar-column');
+                var $placeholder = $('<div id=\"sidebar-placeholder\"></div>').insertBefore($sidebar);
+                var anchorTop = $sidebar.offset().top;
+
+                function onScroll() {
+                    if ($(window).scrollTop() + 18 > anchorTop) {
+                        if (!$sidebar.hasClass('sidebar-fixed')) {
+                            var w = $sidebar.outerWidth();
+                            $placeholder.css({display:'block', width:w+'px', minWidth:w+'px'});
+                            $sidebar.css('width', w+'px');
+                            $sidebar.addClass('sidebar-fixed');
+                        }
+                    } else {
+                        if ($sidebar.hasClass('sidebar-fixed')) {
+                            $sidebar.removeClass('sidebar-fixed').css('width', '');
+                            $placeholder.css('display', 'none');
+                        }
+                    }
+                }
+
+                $(window).on('scroll', onScroll);
+                $(window).on('resize', function() {
+                    $sidebar.removeClass('sidebar-fixed').css('width', '');
+                    $placeholder.css('display', 'none');
+                    anchorTop = $sidebar.offset().top;
+                    onScroll();
+                });
+            });
+        "))
   ),
   titlePanel("Airbnb Text Mining and NLP"),
   actionButton("toggle_sidebar", "Hide / Show Filters"),
@@ -172,11 +215,11 @@ ui <- fluidPage(
           "Nightly price range:",
           min = floor(price_limits[1]),
           max = ceiling(price_limits[2]),
-          value = c(floor(price_limits[1]), min(1000, ceiling(price_limits[2]))),
+          value = c(floor(price_limits[1]), 1000),
           pre = "$"
         ),
         checkboxInput("superhost_only", "Only show superhosts", FALSE),
-        helpText("NLP uses listing-description fields covered in class tokenization, n-grams and sentiment exercises.")
+        helpText("")
       )
     ),
     div(
@@ -300,6 +343,18 @@ server <- function(input, output, session) {
     
     if (nrow(data) == 0) return()
     
+    rating_label <- ifelse(
+      is.na(data[["review_scores.review_scores_rating"]]),
+      "N/A",
+      round(data[["review_scores.review_scores_rating"]], 1)
+    )
+
+    url_html <- ifelse(
+      is.na(data$listing_url) | data$listing_url == "",
+      "",
+      paste0("<a href=\"", data$listing_url, "\" target=\"_blank\" style=\"color:#2C7FB8;\">View on Airbnb</a><br>")
+    )
+
     label_html <- ifelse(
       is.na(data[["images.picture_url"]]) | data[["images.picture_url"]] == "",
       paste0(
@@ -307,7 +362,9 @@ server <- function(input, output, session) {
         data[["address.street"]], "<br>",
         data[["address.country"]], "<br>",
         data$room_type, " | ", data$property_type, "<br>",
-        "Price: ", scales::dollar(data$price)
+        "Price: ", scales::dollar(data$price), "<br>",
+        "Rating: ", rating_label, "<br>",
+        url_html
       ),
       paste0(
         "<strong>", data$name, "</strong><br>",
@@ -316,7 +373,9 @@ server <- function(input, output, session) {
         data[["address.street"]], "<br>",
         data[["address.country"]], "<br>",
         data$room_type, " | ", data$property_type, "<br>",
-        "Price: ", scales::dollar(data$price)
+        "Price: ", scales::dollar(data$price), "<br>",
+        "Rating: ", rating_label, "<br>",
+        url_html
       )
     ) |> lapply(htmltools::HTML)
     
@@ -330,11 +389,18 @@ server <- function(input, output, session) {
         stroke = FALSE,
         fillOpacity = 0.7,
         color = "#2C7FB8",
+        popup = label_html,
         label = label_html,
         labelOptions = leaflet::labelOptions(
-          style = list("font-size" = "13px", "padding" = "6px 10px"),
-          direction = "auto",
-          textsize = "13px"
+          style = list(
+            "font-size" = "13px",
+            "padding" = "8px 12px",
+            "max-width" = "300px",
+            "background-color" = "white",
+            "border-radius" = "8px",
+            "box-shadow" = "0 2px 6px rgba(0,0,0,0.15)"
+          ),
+          direction = "auto"
         )
       ) |>
       leaflet::fitBounds(
@@ -354,16 +420,32 @@ server <- function(input, output, session) {
         property_type = .data$property_type,
         room_type = .data$room_type,
         price = scales::dollar(.data$price),
-        rating = round(.data[["review_scores.review_scores_rating"]], 1)
+        rating = round(.data[["review_scores.review_scores_rating"]], 1),
+        url = ifelse(
+          is.na(.data$listing_url) | .data$listing_url == "",
+          "",
+          paste0("<a href='", .data$listing_url, "' target='_blank'>View</a>")
+        )
       ) |>
       datatable(
         rownames = FALSE,
+        escape = FALSE,
         extensions = "Buttons",
         options = list(
           pageLength = 10,
           scrollX = TRUE,
           dom = "Bfrtip",
-          buttons = c("copy", "csv", "excel", "pdf", "print")
+          buttons = c("copy", "csv", "excel", "pdf", "print"),
+          createdRow = JS(
+            "function(row, data, dataIndex) {",
+            "  var tip = data[0]",
+            "    + ' | ' + data[4]",
+            "    + ' | ' + data[3]",
+            "    + ' | Price: ' + data[5]",
+            "    + ' | Rating: ' + (data[6] === null ? 'N/A' : data[6]);",
+            "  $(row).attr('title', tip);",
+            "}"
+          )
         )
       )
   })
@@ -373,11 +455,13 @@ server <- function(input, output, session) {
     validate(need(nrow(data) > 0, "No listings match the selected filters."))
     
     p <- ggplot(data, aes(.data$price)) +
-      geom_histogram(bins = 30, fill = "#2C7FB8", color = "white") +
+      geom_histogram(bins = 30, fill = "#2C7FB8", color = "white",
+                     aes(text = paste0("Price: ", scales::dollar(after_stat(x)),
+                                       "<br>Count: ", scales::comma(after_stat(count))))) +
       scale_x_continuous(labels = scales::label_dollar()) +
       labs(title = "Nightly Price Distribution", x = "Nightly price", y = "Listings") +
       theme_minimal(base_size = 12)
-    ggplotly(p, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
+    ggplotly(p, tooltip = "text") |> config(displayModeBar = FALSE)
   })
   
   output$word_plot <- renderPlotly({
