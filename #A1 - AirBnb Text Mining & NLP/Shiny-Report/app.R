@@ -54,6 +54,7 @@ countries <- sort(unique(stats::na.omit(airbnb_data[["address.country"]])))
 cities <- sort(unique(stats::na.omit(airbnb_data[["address.market"]])) )
 room_types <- sort(unique(stats::na.omit(airbnb_data$room_type)))
 price_limits <- range(airbnb_data$price, na.rm = TRUE)
+top_terms_n <- 10
 
 ui <- fluidPage(
   tags$head(
@@ -78,7 +79,6 @@ ui <- fluidPage(
           value = c(floor(price_limits[1]), min(1000, ceiling(price_limits[2]))),
           pre = "$"
         ),
-        sliderInput("top_n", "Top terms to display:", min = 5, max = 20, value = 10),
         checkboxInput("superhost_only", "Only show superhosts", FALSE),
         helpText("NLP uses listing-description fields covered in class tokenization, n-grams and sentiment exercises.")
       )
@@ -105,7 +105,7 @@ ui <- fluidPage(
           12,
           tabsetPanel(
             tabPanel(
-              "Frequency Distributions",
+              "Classes Frequency",
               plotOutput("price_plot"),
               fluidRow(
                 column(6, plotOutput("word_plot")),
@@ -248,7 +248,7 @@ server <- function(input, output, session) {
   output$word_plot <- renderPlot({
     data <- tokens() |>
       count(.data$word, sort = TRUE) |>
-      slice_head(n = input$top_n) |>
+      slice_head(n = top_terms_n) |>
       mutate(word = reorder(.data$word, .data$n))
     
     validate(need(nrow(data) > 0, "No tokens available for the selected filters."))
@@ -271,7 +271,7 @@ server <- function(input, output, session) {
       ) |>
       count(.data$word1, .data$word2, sort = TRUE) |>
       unite("bigram", c("word1", "word2"), sep = " ") |>
-      slice_head(n = input$top_n) |>
+      slice_head(n = top_terms_n) |>
       mutate(bigram = reorder(.data$bigram, .data$n))
     
     validate(need(nrow(data) > 0, "No bigrams available for the selected filters."))
@@ -321,7 +321,7 @@ server <- function(input, output, session) {
       inner_join(get_sentiments("bing"), by = "word") |>
       count(.data$sentiment, .data$word, sort = TRUE) |>
       group_by(.data$sentiment) |>
-      slice_head(n = input$top_n) |>
+      slice_head(n = top_terms_n) |>
       ungroup() |>
       mutate(word = reorder(.data$word, .data$n))
     
