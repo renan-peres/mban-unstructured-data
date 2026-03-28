@@ -19,12 +19,20 @@ airbnb_url <- paste0(
   "data/airbnb_all.parquet"
 )
 
+airbnb_local_path <- file.path("data", "airbnb_all.parquet")
+
 text_cols <- c(
   "summary", "space", "description", "neighborhood_overview",
   "notes", "transit", "access", "interaction", "house_rules"
 )
 
 load_airbnb <- function() {
+  if (file.exists(airbnb_local_path)) {
+    message("Loading Airbnb data from local parquet: ", airbnb_local_path)
+    return(arrow::read_parquet(airbnb_local_path, as_data_frame = TRUE))
+  }
+
+  message("Local parquet not found. Loading Airbnb data from GitHub.")
   raw_parquet <- curl::curl_fetch_memory(airbnb_url)$content
   arrow::read_parquet(arrow::BufferReader$create(raw_parquet), as_data_frame = TRUE)
 }
@@ -88,6 +96,24 @@ ui <- fluidPage(
     tags$style(HTML("
             body { background-color: #e9ecef; }
             h2 { color: #2c3e50; }
+
+            #app-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin: 6px 0 14px;
+            }
+            #app-header img {
+                width: 44px;
+                height: 44px;
+                object-fit: contain;
+            }
+            #app-header h2 {
+                margin: 0;
+                font-size: 24px;
+                line-height: 1.25;
+                color: #2c3e50;
+            }
 
             #app-layout { display: flex; gap: 18px; align-items: flex-start; }
             #sidebar-column { width: 26%; min-width: 260px; }
@@ -200,7 +226,14 @@ ui <- fluidPage(
             });
         "))
   ),
-  titlePanel("Airbnb Text Mining and NLP"),
+  div(
+    id = "app-header",
+    tags$img(
+      src = "https://tse4.mm.bing.net/th/id/OIP.fy97ig0fRI4BlT95a3nqqwHaHw?w=840&h=880&rs=1&pid=ImgDetMain&o=7&rm=3",
+      alt = "Airbnb logo"
+    ),
+    tags$h2("Airbnb Text Mining and NLP | Business Analysis with Unstructured Data | Spring 2026")
+  ),
   actionButton("toggle_sidebar", "Hide / Show Filters"),
   div(
     id = "app-layout",
