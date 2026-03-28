@@ -50,6 +50,32 @@ airbnb_data <- load_airbnb() |>
     latitude = parse_coordinates(.data[["address.location.coordinates"]], 2)
   )
 
+# --- Pre-tokenize and pre-join at startup for fast filtering ---
+stop_words_vec <- tidytext::stop_words$word
+
+all_words <- airbnb_data |>
+  select(all_of(c("row_id", "text"))) |>
+  unnest_tokens("word", "text")
+
+all_tokens <- all_words |>
+  filter(!.data$word %in% stop_words_vec)
+
+all_bigrams <- airbnb_data |>
+  select(all_of(c("row_id", "text"))) |>
+  unnest_tokens("bigram", "text", token = "ngrams", n = 2) |>
+  separate("bigram", c("word1", "word2"), sep = " ", fill = "right") |>
+  filter(!.data$word1 %in% stop_words_vec, !.data$word2 %in% stop_words_vec) |>
+  unite("bigram", c("word1", "word2"), sep = " ")
+
+afinn_lex <- get_sentiments("afinn")
+bing_lex  <- get_sentiments("bing")
+nrc_lex   <- get_sentiments("nrc") |>
+  filter(.data$sentiment %in% c("positive", "negative"))
+
+all_afinn <- inner_join(all_words, afinn_lex, by = "word")
+all_bing  <- inner_join(all_words, bing_lex, by = "word")
+all_nrc   <- inner_join(all_words, nrc_lex, by = "word", relationship = "many-to-many")
+
 countries <- sort(unique(stats::na.omit(airbnb_data[["address.country"]])))
 cities <- sort(unique(stats::na.omit(airbnb_data[["address.market"]])) )
 room_types <- sort(unique(stats::na.omit(airbnb_data$room_type)))
@@ -105,7 +131,7 @@ ui <- fluidPage(
           12,
           tabsetPanel(
             tabPanel(
-              "Classes Frequency",
+              "Frequency Distributions",
               plotOutput("price_plot"),
               fluidRow(
                 column(6, plotOutput("word_plot")),
@@ -125,7 +151,8 @@ server <- function(input, output, session) {
     session$sendCustomMessage("toggleSidebar", list())
   })
   
-  filtered_data <- reactive({
+  # --- Debounced filtered data (avoids rapid recalc on slider drag) ---
+  filtered_data_raw <- reactive({
     data <- airbnb_data |>
       filter(
         !is.na(.data$price),
@@ -145,15 +172,26 @@ server <- function(input, output, session) {
     data
   })
   
+  filtered_data <- filtered_data_raw |> debounce(300)
+  
+  # --- Filter pre-computed tokens/sentiments by matching row_id ---
+  filtered_ids <- reactive({
+    filtered_data()$row_id
+  })
+  
   words <- reactive({
-    filtered_data() |>
-      select(all_of(c("row_id", "text"))) |>
-      unnest_tokens("word", "text")
+    ids <- filtered_ids()
+    all_words[all_words$row_id %in% ids, ]
   })
   
   tokens <- reactive({
-    words() |>
-      anti_join(tidytext::stop_words, by = "word")
+    ids <- filtered_ids()
+    all_tokens[all_tokens$row_id %in% ids, ]
+  })
+  
+  bigrams <- reactive({
+    ids <- filtered_ids()
+    all_bigrams[all_bigrams$row_id %in% ids, ]
   })
   
   mapped_data <- reactive({
@@ -178,9 +216,19 @@ server <- function(input, output, session) {
   
   output$token_count <- renderText(scales::comma(nrow(tokens())))
   
+  # --- Map: render base tiles once, update markers via proxy ---
   output$map <- leaflet::renderLeaflet({
+    leaflet::leaflet() |>
+      leaflet::addTiles()
+  })
+  
+  observe({
     data <- mapped_data()
-    validate(need(nrow(data) > 0, "No listings with coordinates match the selected filters."))
+    
+    proxy <- leaflet::leafletProxy("map") |>
+      leaflet::clearGroup("listings")
+    
+    if (nrow(data) == 0) return()
     
     popup_html <- ifelse(
       is.na(data[["images.picture_url"]]) | data[["images.picture_url"]] == "",
@@ -202,9 +250,10 @@ server <- function(input, output, session) {
       )
     )
     
-    leaflet::leaflet(data) |>
-      leaflet::addTiles() |>
+    proxy |>
       leaflet::addCircleMarkers(
+        data = data,
+        group = "listings",
         lng = ~longitude,
         lat = ~latitude,
         radius = ~pmax(5, pmin(14, price / 100)),
@@ -217,6 +266,12 @@ server <- function(input, output, session) {
           autoPan = TRUE,
           closeButton = TRUE
         )
+      ) |>
+      leaflet::fitBounds(
+        lng1 = min(data$longitude, na.rm = TRUE),
+        lat1 = min(data$latitude, na.rm = TRUE),
+        lng2 = max(data$longitude, na.rm = TRUE),
+        lat2 = max(data$latitude, na.rm = TRUE)
       )
   })
   
@@ -261,16 +316,8 @@ server <- function(input, output, session) {
   })
   
   output$bigram_plot <- renderPlot({
-    data <- filtered_data() |>
-      select(all_of(c("row_id", "text"))) |>
-      unnest_tokens("bigram", "text", token = "ngrams", n = 2) |>
-      separate("bigram", c("word1", "word2"), sep = " ") |>
-      filter(
-        !.data$word1 %in% tidytext::stop_words$word,
-        !.data$word2 %in% tidytext::stop_words$word
-      ) |>
-      count(.data$word1, .data$word2, sort = TRUE) |>
-      unite("bigram", c("word1", "word2"), sep = " ") |>
+    data <- bigrams() |>
+      count(.data$bigram, sort = TRUE) |>
       slice_head(n = top_terms_n) |>
       mutate(bigram = reorder(.data$bigram, .data$n))
     
@@ -284,22 +331,19 @@ server <- function(input, output, session) {
   })
   
   output$sentiment_plot <- renderPlot({
+    ids <- filtered_ids()
+    
+    afinn_data <- all_afinn[all_afinn$row_id %in% ids, ]
+    bing_data  <- all_bing[all_bing$row_id %in% ids, ]
+    nrc_data   <- all_nrc[all_nrc$row_id %in% ids, ]
+    
     data <- bind_rows(
-      words() |>
-        inner_join(get_sentiments("afinn"), by = "word") |>
+      afinn_data |>
         summarise(sentiment = sum(.data$value)) |>
         mutate(method = "AFINN"),
       bind_rows(
-        words() |>
-          inner_join(get_sentiments("bing"), by = "word") |>
-          mutate(method = "Bing"),
-        words() |>
-          inner_join(
-            get_sentiments("nrc") |> filter(.data$sentiment %in% c("positive", "negative")),
-            by = "word",
-            relationship = "many-to-many"
-          ) |>
-          mutate(method = "NRC")
+        bing_data |> mutate(method = "Bing"),
+        nrc_data |> mutate(method = "NRC")
       ) |>
         count(.data$method, .data$sentiment) |>
         spread("sentiment", "n", fill = 0) |>
@@ -317,8 +361,9 @@ server <- function(input, output, session) {
   })
   
   output$bing_plot <- renderPlot({
-    data <- words() |>
-      inner_join(get_sentiments("bing"), by = "word") |>
+    bing_data <- all_bing[all_bing$row_id %in% filtered_ids(), ]
+    
+    data <- bing_data |>
       count(.data$sentiment, .data$word, sort = TRUE) |>
       group_by(.data$sentiment) |>
       slice_head(n = top_terms_n) |>
