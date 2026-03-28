@@ -7,6 +7,8 @@ suppressPackageStartupMessages({
   library(rappdirs)
 })
 
+options(menu.graphics = FALSE)
+
 text_cols <- c(
   "summary", "space", "description", "neighborhood_overview",
   "notes", "transit", "access", "interaction", "house_rules"

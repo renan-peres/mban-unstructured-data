@@ -7,6 +7,8 @@ on:
 env:
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
   NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+  DEBIAN_FRONTEND: noninteractive
+  R_LIBS_USER: /home/runner/work/_temp/Rlibs
 
 jobs:
   build:
@@ -19,13 +21,29 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libarchive-dev libcurl4-openssl-dev
+          sudo apt-get install -y --no-install-recommends \
+            libarchive-dev \
+            libcurl4-openssl-dev \
+            libpng-dev \
+            gdal-bin \
+            libgdal-dev \
+            libudunits2-dev \
+            libproj-dev \
+            libgeos-dev \
+            libsqlite3-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libfribidi-dev
 
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: "4.4"
           use-public-rspm: true
+
+      - name: Create R library path
+        run: mkdir -p "$R_LIBS_USER"
 
       - name: Cache R packages
         uses: actions/cache@v4
@@ -37,6 +55,8 @@ jobs:
       - name: Install R packages
         shell: Rscript {0}
         run: |
+          options(menu.graphics = FALSE)
+          Sys.setenv(CI = "true")
           pkgs <- c(
             "arrow", "dplyr", "tidyr", "tidytext", "textdata",
             "rappdirs", "shinylive",
@@ -50,12 +70,16 @@ jobs:
       - name: Prepare Shinylive data (precompute RDS assets)
         shell: Rscript {0}
         run: |
+          options(menu.graphics = FALSE)
+          Sys.setenv(CI = "true")
           setwd("apps/airbnb-shinylive/scripts")
           source("prepare_shinylive_data.R")
 
       - name: Export Shinylive static site
         shell: Rscript {0}
         run: |
+          options(menu.graphics = FALSE)
+          Sys.setenv(CI = "true")
           setwd("apps/airbnb-shinylive/scripts")
           source("export_shinylive.R")
 
