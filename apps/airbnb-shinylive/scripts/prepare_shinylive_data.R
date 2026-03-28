@@ -24,13 +24,14 @@ parse_coordinates <- function(x, index) {
   )
 }
 
-repo_root <- normalizePath(file.path(getwd(), "..", "..", ".."), mustWork = TRUE)
+# Navigate to repo root (3 levels up from scripts/)
+repo_root <- normalizePath("../../..", winslash = "/")
 source_parquet <- file.path(repo_root, "#A1 - AirBnb Text Mining & NLP", "data", "airbnb_all.parquet")
 out_dir <- file.path(repo_root, "apps", "airbnb-shinylive", "data")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 if (!file.exists(source_parquet)) {
-  stop("Could not find source parquet file at: ", source_parquet)
+  stop("Could not find source parquet file at: ", source_parquet, "\nWorking directory: ", getwd())
 }
 
 airbnb_data <- arrow::read_parquet(source_parquet, as_data_frame = TRUE) |>

@@ -166,6 +166,7 @@ venv.bak/
 # mkdocs documentation
 # /site  -- intentionally tracked; contains Shinylive export for Netlify
 !/site
+site/airbnb-shinylive/
 
 # mypy
 .mypy_cache/

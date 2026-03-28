@@ -2,13 +2,14 @@ suppressPackageStartupMessages({
   library(shinylive)
 })
 
-repo_root <- normalizePath(file.path(getwd(), "..", "..", ".."), mustWork = TRUE)
+# Navigate to repo root (3 levels up from scripts/)
+repo_root <- normalizePath("../../..", winslash = "/")
 app_dir <- file.path(repo_root, "apps", "airbnb-shinylive")
 site_dir <- file.path(repo_root, "site")
 subdir_name <- "airbnb-shinylive"
 
 if (!file.exists(file.path(app_dir, "app.R"))) {
-  stop("Could not find app.R in: ", app_dir)
+  stop("Could not find app.R in: ", app_dir, "\nWorking directory: ", getwd())
 }
 
 # Clean prior exported app subfolder to avoid stale assets.
