@@ -1,0 +1,12 @@
+name: airbnb-text-mining-nlp
+title: airbnb-text-mining-nlp
+username: unstructured-data
+account: unstructured-data
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 17008464
+bundleId: 11775235
+url: https://unstructured-data.shinyapps.io/airbnb-text-mining-nlp/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
